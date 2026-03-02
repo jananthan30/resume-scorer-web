@@ -1467,6 +1467,131 @@ def page_rewriter():
         render_rewrite_results(data)
 
 
+def _make_resume_docx(resume_text: str) -> bytes:
+    """
+    Convert a plain-text ATS resume (pipe-separated job lines, ALL-CAPS headers,
+    bullet •  lines, ___ separators) into a formatted DOCX.  Returns raw bytes.
+    """
+    import io
+    import re
+    from docx import Document
+    from docx.shared import Pt, Inches
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    doc = Document()
+    for sec in doc.sections:
+        sec.top_margin = sec.bottom_margin = Inches(0.75)
+        sec.left_margin = sec.right_margin = Inches(0.75)
+
+    # Default Normal style
+    normal = doc.styles["Normal"]
+    normal.font.name = "Calibri"
+    normal.font.size = Pt(10)
+
+    def _strip_md(text):
+        return re.sub(r"\*\*(.*?)\*\*", r"\1", text)
+
+    def _para(text, bold=False, size=10, sb=0, sa=2):
+        p = doc.add_paragraph()
+        run = p.add_run(_strip_md(text))
+        run.bold = bold
+        run.font.name = "Calibri"
+        run.font.size = Pt(size)
+        p.paragraph_format.space_before = Pt(sb)
+        p.paragraph_format.space_after = Pt(sa)
+        return p
+
+    def _bullet(text):
+        text = _strip_md(text.lstrip("•-").strip())
+        p = doc.add_paragraph()
+        run = p.add_run(f"\u2022  {text}")
+        run.font.name = "Calibri"
+        run.font.size = Pt(10)
+        pf = p.paragraph_format
+        pf.left_indent = Inches(0.25)
+        pf.space_before = Pt(0)
+        pf.space_after = Pt(1)
+
+    def _hrule():
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(4)
+        p.paragraph_format.space_after = Pt(4)
+        pPr = p._p.get_or_add_pPr()
+        pBdr = OxmlElement("w:pBdr")
+        bottom = OxmlElement("w:bottom")
+        bottom.set(qn("w:val"), "single")
+        bottom.set(qn("w:sz"), "6")
+        bottom.set(qn("w:space"), "1")
+        bottom.set(qn("w:color"), "94a3b8")
+        pBdr.append(bottom)
+        pPr.append(pBdr)
+
+    DATE_RE = re.compile(
+        r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s,]+\d{4}"
+        r"|^\d{4}\s*[-\u2013]\s*(\d{4}|Present)",
+        re.IGNORECASE,
+    )
+
+    lines = resume_text.strip().splitlines()
+    name_done = False
+    contact_done = False
+
+    for line in lines:
+        s = line.strip()
+
+        # Separator line (___ or ---)
+        if s and len(s) > 5 and len(set(s) - {" "}) == 1 and s[0] in "_-=":
+            _hrule()
+            continue
+
+        if not s:
+            continue
+
+        # First non-empty line → Name (large bold)
+        if not name_done:
+            _para(s, bold=True, size=16, sb=0, sa=2)
+            name_done = True
+            continue
+
+        # Second non-empty line → Contact info
+        if not contact_done:
+            _para(s, bold=False, size=10, sb=0, sa=6)
+            contact_done = True
+            continue
+
+        # Section header: ALL CAPS, no pipe/bullet
+        if (
+            s.isupper() and 3 <= len(s) <= 70
+            and "\u2022" not in s and "|" not in s
+            and not s[0].isdigit()
+        ):
+            _para(s, bold=True, size=11, sb=8, sa=3)
+            continue
+
+        # Bullet point
+        if s.startswith("\u2022") or (s.startswith("-") and len(s) > 3 and s[1] == " "):
+            _bullet(s)
+            continue
+
+        # Job/company line with pipe separator
+        if "|" in s and not s.isupper():
+            _para(s, bold=True, size=10, sb=6, sa=1)
+            continue
+
+        # Date line
+        if DATE_RE.search(s):
+            _para(s, bold=False, size=10, sb=0, sa=1)
+            continue
+
+        # Regular text
+        _para(s, bold=False, size=10, sb=1, sa=2)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
 def render_rewrite_results(data: dict):
     """Show before/after scores, changes, and download button."""
     original = data.get("original_scores", {})
@@ -1509,22 +1634,35 @@ def render_rewrite_results(data: dict):
         for change in changes:
             st.markdown(f"- {change}")
 
-    # ─── Rewritten resume text ────────────────────────────────────────────
+    # ─── Rewritten resume text + DOCX download ────────────────────────────
     rewritten_text = data.get("rewritten_resume", "")
     if rewritten_text:
         st.markdown("---")
         st.markdown("##### Tailored Resume")
-        st.text_area("Copy your tailored resume", value=rewritten_text, height=400, key="rewritten_output")
+        st.text_area("Preview your tailored resume", value=rewritten_text, height=400, key="rewritten_output")
 
-        # Download as .txt
-        st.download_button(
-            label="Download Tailored Resume (.txt)",
-            data=rewritten_text,
-            file_name="tailored_resume.txt",
-            mime="text/plain",
-            use_container_width=True,
-            type="primary",
-        )
+        dl_col, _ = st.columns([2, 3])
+        with dl_col:
+            try:
+                docx_bytes = _make_resume_docx(rewritten_text)
+                st.download_button(
+                    label="Download Tailored Resume (.docx)",
+                    data=docx_bytes,
+                    file_name="tailored_resume.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
+                    type="primary",
+                )
+            except Exception:
+                # Fallback to plain text if DOCX generation fails
+                st.download_button(
+                    label="Download Tailored Resume (.txt)",
+                    data=rewritten_text,
+                    file_name="tailored_resume.txt",
+                    mime="text/plain",
+                    use_container_width=True,
+                    type="primary",
+                )
 
     st.markdown(f"**Model:** {data.get('model_used', 'claude-sonnet-4-6')}")
 
