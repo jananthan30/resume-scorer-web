@@ -1719,8 +1719,30 @@ def _make_resume_docx(resume_text: str, format_style: str = "ats") -> bytes:
         re.IGNORECASE,
     )
 
+    def _hanging_para(text, sb=2, sa=5):
+        """Paragraph with hanging indent, used for long publication citations."""
+        p = doc.add_paragraph()
+        run = p.add_run(_strip_md(text))
+        run.font.name = t["font"]
+        run.font.size = Pt(max(t["body_size"] - 1, 9))
+        pf = p.paragraph_format
+        pf.left_indent   = Inches(0.35)
+        pf.first_line_indent = Inches(-0.35)
+        pf.space_before  = Pt(sb)
+        pf.space_after   = Pt(sa)
+        return p
+
+    PUB_SECTIONS = {
+        "PUBLICATIONS", "SELECTED PUBLICATIONS", "PEER-REVIEWED PUBLICATIONS",
+        "PEER-REVIEWED ARTICLES", "JOURNAL ARTICLES", "BOOK CHAPTERS",
+        "CONFERENCE ABSTRACTS", "PRESENTATIONS", "GRANTS",
+    }
+    EDU_SECTIONS = {"EDUCATION", "ACADEMIC BACKGROUND", "ACADEMIC CREDENTIALS"}
+
     lines = resume_text.strip().splitlines()
     name_done = contact_done = False
+    current_section = ""
+    _pub_num = 0  # running counter for publication numbering
 
     for line in lines:
         s = line.strip()
@@ -1761,6 +1783,8 @@ def _make_resume_docx(resume_text: str, format_style: str = "ats") -> bytes:
             and "|" not in s and not s[0].isdigit()
         ):
             _section_header(s)
+            current_section = s.strip()
+            _pub_num = 0  # reset numbering at each new section
             continue
 
         # Bullet point
@@ -1782,8 +1806,15 @@ def _make_resume_docx(resume_text: str, format_style: str = "ats") -> bytes:
                   italic=(fs == "harvard"))
             continue
 
-        # Regular text
-        _para(s, bold=False, size=t["body_size"], sb=1, sa=2)
+        # Publications section: hanging-indent citations; Education: bold degree line
+        if current_section in PUB_SECTIONS:
+            _pub_num += 1
+            _hanging_para(f"{_pub_num}.\u2002{s}")
+        elif current_section in EDU_SECTIONS and not s[0].isdigit() and "|" not in s:
+            # Degree name — bold; school/date lines already caught by pipe/date rules
+            _para(s, bold=True, size=t["body_size"], sb=4, sa=1)
+        else:
+            _para(s, bold=False, size=t["body_size"], sb=1, sa=2)
 
     buf = io.BytesIO()
     doc.save(buf)
