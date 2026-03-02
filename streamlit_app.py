@@ -1521,8 +1521,9 @@ def page_dashboard():
         st.markdown("##### Claude Code Plugin Setup")
         st.markdown(
             '<p style="color: #94a3b8; font-size: 13px;">'
-            "Generate an API key so your local Claude Code plugin uses your "
-            f"<strong style='color: #818cf8;'>{tier.title()}</strong> account for scoring."
+            "Generate an API key to connect your account to the local Claude Code plugin. "
+            "<strong>Claude Code users only need Pro</strong> — your Anthropic subscription "
+            "handles resume writing; this key unlocks unlimited <em>scoring</em> in the plugin."
             "</p>",
             unsafe_allow_html=True,
         )
