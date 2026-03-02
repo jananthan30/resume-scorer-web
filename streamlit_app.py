@@ -260,8 +260,8 @@ def resume_input(label: str = "Your Resume", prefill: str = "", key_prefix: str 
 
     Returns the resume text (from file, stored resume, or typed).
     """
-    # Determine initial value: prefill (from Discover handoff) > stored > empty
-    initial = prefill or st.session_state.get("stored_resume", "") or ""
+    text_key = f"{key_prefix}_text"
+    extracted_key = f"{key_prefix}_extracted"
 
     # File upload
     uploaded = st.file_uploader(
@@ -270,10 +270,31 @@ def resume_input(label: str = "Your Resume", prefill: str = "", key_prefix: str 
         key=f"{key_prefix}_file_upload",
     )
 
+    # When a new file is uploaded, extract text and store in session state
     if uploaded:
-        extracted = _extract_file_text(uploaded)
-        if extracted and not extracted.startswith("["):
-            initial = extracted
+        # Only extract once per file (check by name+size)
+        file_sig = f"{uploaded.name}_{uploaded.size}"
+        if st.session_state.get(f"{key_prefix}_file_sig") != file_sig:
+            extracted = _extract_file_text(uploaded)
+            if extracted and not extracted.startswith("["):
+                st.session_state[extracted_key] = extracted
+                st.session_state[f"{key_prefix}_file_sig"] = file_sig
+                # Also save as stored resume automatically
+                st.session_state.stored_resume = extracted
+                st.rerun()
+    else:
+        # File was removed/cleared
+        if st.session_state.get(f"{key_prefix}_file_sig"):
+            st.session_state.pop(f"{key_prefix}_file_sig", None)
+            st.session_state.pop(extracted_key, None)
+
+    # Determine initial value: extracted from file > prefill > stored > empty
+    initial = (
+        st.session_state.get(extracted_key, "")
+        or prefill
+        or st.session_state.get("stored_resume", "")
+        or ""
+    )
 
     # Text area
     resume_text = st.text_area(
@@ -281,7 +302,6 @@ def resume_input(label: str = "Your Resume", prefill: str = "", key_prefix: str 
         value=initial,
         height=height,
         placeholder="Paste your resume text here, or upload a file above.",
-        key=f"{key_prefix}_text",
     )
 
     # Save toggle
