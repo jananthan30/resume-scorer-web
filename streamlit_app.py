@@ -197,14 +197,21 @@ def api(method: str, endpoint: str, json_data: dict = None, token: str = None) -
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    # Scraping endpoints need extra time
+    timeout = 90 if endpoint == "/jobs/fetch-jd" else (30 if method == "GET" else 60)
     try:
         if method == "GET":
-            r = requests.get(url, headers=headers, timeout=30)
+            r = requests.get(url, headers=headers, timeout=timeout)
         elif method == "DELETE":
-            r = requests.delete(url, headers=headers, timeout=30)
+            r = requests.delete(url, headers=headers, timeout=timeout)
         else:
-            r = requests.post(url, json=json_data or {}, headers=headers, timeout=60)
-        return {"status": r.status_code, "data": r.json()}
+            r = requests.post(url, json=json_data or {}, headers=headers, timeout=timeout)
+        try:
+            data = r.json()
+        except ValueError:
+            # Empty body or HTML error page (proxy timeout, 502, etc.)
+            data = {"detail": r.text[:300].strip() if r.text.strip() else f"Empty response (HTTP {r.status_code})"}
+        return {"status": r.status_code, "data": data}
     except requests.RequestException as e:
         return {"status": 0, "data": {"detail": str(e)}}
 
