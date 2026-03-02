@@ -14,12 +14,14 @@ Deploy to Streamlit Cloud:
     3. Set secrets: SCORER_API_URL, STRIPE_PUBLISHABLE_KEY
 """
 
+import json
 import os
 import uuid
 
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+from streamlit_cookies_controller import CookieController
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 API_URL = os.getenv("SCORER_API_URL", "https://resume-scorer.fly.dev")
@@ -31,6 +33,9 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+# ─── Cookie controller (persists auth across browser refreshes) ──────────────
+_cookies = CookieController(key="rb_cookies")
 
 # ─── Session state defaults ─────────────────────────────────────────────────
 _defaults = {
@@ -52,6 +57,18 @@ _defaults = {
 for key, val in _defaults.items():
     if key not in st.session_state:
         st.session_state[key] = val
+
+# ─── Restore session from cookie (survives page refresh) ────────────────────
+if st.session_state.token is None:
+    _cookie_token = _cookies.get("rb_token")
+    _cookie_user = _cookies.get("rb_user")
+    if _cookie_token and _cookie_user:
+        try:
+            st.session_state.token = _cookie_token
+            st.session_state.user = json.loads(_cookie_user)
+        except Exception:
+            _cookies.remove("rb_token")
+            _cookies.remove("rb_user")
 
 
 # ─── Custom CSS ──────────────────────────────────────────────────────────────
@@ -455,8 +472,12 @@ def render_nav():
     with cols[6]:
         if is_authenticated():
             if st.button("Logout", use_container_width=True):
+                _cookies.remove("rb_token")
+                _cookies.remove("rb_user")
                 st.session_state.token = None
                 st.session_state.user = None
+                st.session_state.stored_resume = ""
+                st.session_state.resume_on_file = False
                 st.session_state.page = "home"
                 st.rerun()
         else:
@@ -1435,6 +1456,10 @@ def page_register():
                 st.session_state.token = data["token"]
                 st.session_state.user = data["user"]
                 st.session_state.page = "scorer"
+                # Persist auth in browser cookie (30 days)
+                _max_age = 30 * 24 * 3600
+                _cookies.set("rb_token", data["token"], max_age=_max_age)
+                _cookies.set("rb_user", json.dumps(data["user"]), max_age=_max_age)
                 # If user had a resume before registering, save it to their account now
                 pre_existing = st.session_state.get("stored_resume", "")
                 if pre_existing:
@@ -1482,6 +1507,10 @@ def page_login():
                 st.session_state.token = data["token"]
                 st.session_state.user = data["user"]
                 st.session_state.page = "dashboard"
+                # Persist auth in browser cookie (30 days)
+                _max_age = 30 * 24 * 3600
+                _cookies.set("rb_token", data["token"], max_age=_max_age)
+                _cookies.set("rb_user", json.dumps(data["user"]), max_age=_max_age)
                 # Auto-load saved resume from cloud into session
                 saved = _fetch_saved_resume(data["token"])
                 if saved:
@@ -1562,6 +1591,8 @@ def page_dashboard():
             st.progress(used_pct, text=f"{total_used}/5 free scores used")
     elif usage["status"] == 401:
         st.warning("Session expired. Please log in again.")
+        _cookies.remove("rb_token")
+        _cookies.remove("rb_user")
         st.session_state.token = None
         st.session_state.user = None
         st.session_state.page = "login"
