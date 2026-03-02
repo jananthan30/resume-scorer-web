@@ -17,6 +17,7 @@ Deploy to Streamlit Cloud:
 import base64
 import json
 import os
+import threading
 import time
 import uuid
 
@@ -223,8 +224,15 @@ def api(method: str, endpoint: str, json_data: dict = None, token: str = None) -
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    # Scraping endpoints need extra time
-    timeout = 90 if endpoint == "/jobs/fetch-jd" else (30 if method == "GET" else 60)
+    # Long-running endpoints need generous timeouts
+    if endpoint == "/jobs/fetch-jd":
+        timeout = 90
+    elif endpoint in ("/rewrite", "/cover-letter", "/jobs/discover"):
+        timeout = 150
+    elif method == "GET":
+        timeout = 30
+    else:
+        timeout = 60
     try:
         if method == "GET":
             r = requests.get(url, headers=headers, timeout=timeout)
@@ -1371,17 +1379,59 @@ def page_rewriter():
             st.warning("Resume seems too short. Please paste the full text.")
             return
 
-        with st.spinner("AI is tailoring your resume... This may take 30-60 seconds."):
-            result = api("POST", "/rewrite", {
+        # Run API call in background thread so we can show staged progress
+        _result_holder: dict = {"result": None}
+
+        def _do_rewrite():
+            _result_holder["result"] = api("POST", "/rewrite", {
                 "resume_text": resume_text,
                 "jd_text": jd_text,
             }, token=st.session_state.token)
+
+        _thread = threading.Thread(target=_do_rewrite, daemon=True)
+        _thread.start()
+
+        _stages = [
+            (8,  "Analyzing job description and requirements…"),
+            (18, "Extracting must-have skills and keywords…"),
+            (30, "Matching your experience to the role…"),
+            (44, "Rewriting your professional summary…"),
+            (58, "Tailoring experience bullets with JD language…"),
+            (70, "Optimizing ATS keyword placement…"),
+            (82, "Running ATS + HR scoring on tailored draft…"),
+            (91, "Quality-checking the final resume…"),
+        ]
+        _status_box = st.empty()
+        _pbar = st.progress(0)
+        _stage_idx = 0
+
+        while _thread.is_alive():
+            _pct, _msg = _stages[min(_stage_idx, len(_stages) - 1)]
+            _status_box.markdown(
+                f'<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;'
+                f'padding:14px 18px;color:#94a3b8;font-size:14px;">'
+                f'<span style="color:#818cf8;font-weight:600;">Claude AI</span> &nbsp;·&nbsp; {_msg}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            _pbar.progress(_pct)
+            time.sleep(10)
+            _stage_idx += 1
+
+        _status_box.empty()
+        _pbar.empty()
+        result = _result_holder["result"]
+
+        if result is None:
+            st.error("Rewrite timed out or failed to reach the server. Please try again.")
+            return
 
         if result["status"] != 200:
             st.error(f"Rewrite failed: {result['data'].get('detail', 'Unknown error')}")
             return
 
         st.session_state.rewrite_result = result["data"]
+        st.rerun()
 
     # Display rewrite results
     data = st.session_state.get("rewrite_result")
