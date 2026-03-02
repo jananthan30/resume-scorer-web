@@ -297,7 +297,7 @@ def api_stream(endpoint: str, json_data: dict, token: str, timeout: int = 180):
                     detail = r.json().get("detail", f"HTTP {r.status_code}")
                 except Exception:
                     detail = r.text[:300] or f"HTTP {r.status_code}"
-                yield {"stage": "error", "detail": detail}
+                yield {"stage": "error", "detail": detail, "status": r.status_code}
                 return
             for raw_line in r.iter_lines():
                 if raw_line and raw_line.startswith(b"data: "):
@@ -911,17 +911,46 @@ def page_scorer():
             return
 
         endpoint = "/score/combined" if use_llm else "/score/both"
-        spinner_msg = "Analyzing with ATS + HR + LLM..." if use_llm else "Analyzing your resume against the job description..."
+        payload = {"resume_text": resume_text, "jd_text": jd_text}
+        if not use_llm:
+            payload["include_explanation"] = True
 
-        with st.spinner(spinner_msg):
-            token = st.session_state.token
-            payload = {"resume_text": resume_text, "jd_text": jd_text}
-            if not use_llm:
-                payload["include_explanation"] = True
-            result = api("POST", endpoint, payload, token=token)
+        _stage_labels = {
+            "scoring":     "Running ATS + HR analysis in parallel…",
+            "llm_scoring": "Claude AI is reviewing your resume…",
+        }
+        _status_box = st.empty()
+        _pbar = st.progress(0)
+        _score_data = None
+        _score_error = None
+        _score_status = 200
 
-        if result["status"] == 402:
-            # Free tier exhausted
+        for _ev in api_stream(endpoint, payload, token=st.session_state.token):
+            _stage = _ev.get("stage", "")
+            _pct   = _ev.get("pct", 0)
+
+            if _stage == "error":
+                _score_error  = _ev.get("detail", "Unknown error")
+                _score_status = _ev.get("status", 500)
+                break
+            elif _stage == "done":
+                _score_data = _ev.get("result")
+                break
+            else:
+                _label = _stage_labels.get(_stage, "Analyzing…")
+                _status_box.markdown(
+                    f'<div style="background:#1e293b;border:1px solid #334155;'
+                    f'border-radius:8px;padding:14px 18px;color:#94a3b8;font-size:14px;">'
+                    f'<span style="color:#818cf8;font-weight:600;">Scorer</span>'
+                    f'&nbsp;·&nbsp;{_label}</div>',
+                    unsafe_allow_html=True,
+                )
+                _pbar.progress(max(1, _pct) / 100)
+
+        _status_box.empty()
+        _pbar.empty()
+
+        if _score_status == 402:
             st.error("You've used all 5 free scores.")
             st.markdown("---")
             st.markdown(
@@ -941,9 +970,15 @@ def page_scorer():
                     st.rerun()
             return
 
-        if result["status"] != 200:
-            st.error(f"Scoring failed: {result['data'].get('detail', 'Unknown error')}")
+        if _score_error:
+            st.error(f"Scoring failed: {_score_error}")
             return
+
+        if not _score_data:
+            st.error("Scorer returned no data. Please try again.")
+            return
+
+        result = {"status": 200, "data": _score_data}
 
         # Success — store result and bump counter
         data = result["data"]
