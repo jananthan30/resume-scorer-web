@@ -1504,7 +1504,14 @@ def page_rewriter():
         unsafe_allow_html=True,
     )
 
-    _, btn_col, _ = st.columns([3, 2, 3])
+    _opt_col, btn_col, _ = st.columns([2, 2, 1])
+    with _opt_col:
+        _include_llm = st.checkbox(
+            "Include LLM evaluation",
+            value=False,
+            help="Runs an extra Claude scoring pass after rewrite (+20-30s). Useful for deeper analysis but slower.",
+            key="rewrite_include_llm",
+        )
     with btn_col:
         rewrite_clicked = st.button("Rewrite My Resume", use_container_width=True, type="primary")
 
@@ -1530,7 +1537,7 @@ def page_rewriter():
 
         for _event in api_stream(
             "/rewrite",
-            {"resume_text": resume_text, "jd_text": jd_text, "format_style": _selected_fmt},
+            {"resume_text": resume_text, "jd_text": jd_text, "format_style": _selected_fmt, "include_llm_score": _include_llm},
             token=st.session_state.token,
         ):
             _stage = _event.get("stage", "")
