@@ -214,44 +214,38 @@ def _extract_file_text(uploaded_file) -> str:
     raw = uploaded_file.read()
     if name.endswith(".txt") or name.endswith(".md"):
         return raw.decode("utf-8", errors="replace")
-    # Send to server for extraction via base64
-    import base64
-    b64 = base64.b64encode(raw).decode("ascii")
-    result = api("POST", "/score/both", {
-        "resume_file": b64,
-        "resume_filename": uploaded_file.name,
-        "jd_text": "test",
-    })
-    # If server extracted it, pull from the response — but this actually scores.
-    # Better: extract locally.
-    if name.endswith(".pdf"):
-        try:
-            import io
-            try:
-                from PyPDF2 import PdfReader
-                reader = PdfReader(io.BytesIO(raw))
-                return "\n".join(p.extract_text() or "" for p in reader.pages)
-            except ImportError:
-                pass
-            try:
-                import pdfplumber
-                with pdfplumber.open(io.BytesIO(raw)) as pdf:
-                    return "\n".join(p.extract_text() or "" for p in pdf.pages)
-            except ImportError:
-                pass
-        except Exception:
-            pass
-        return "[Could not extract PDF text. Please paste your resume instead.]"
-    elif name.endswith(".docx"):
+    if name.endswith(".docx"):
         try:
             import io
             from docx import Document
             doc = Document(io.BytesIO(raw))
-            return "\n".join(p.text for p in doc.paragraphs)
+            text = "\n".join(p.text for p in doc.paragraphs)
+            if text.strip():
+                return text
+            st.warning("DOCX file appears empty. Please paste your resume instead.")
+            return ""
         except ImportError:
-            return "[python-docx not available. Please paste your resume instead.]"
-        except Exception:
-            return "[Could not extract DOCX text. Please paste your resume instead.]"
+            st.error("python-docx is not installed. Please paste your resume text instead.")
+            return ""
+        except Exception as e:
+            st.error(f"Could not read DOCX file: {e}")
+            return ""
+    if name.endswith(".pdf"):
+        try:
+            import io
+            from PyPDF2 import PdfReader
+            reader = PdfReader(io.BytesIO(raw))
+            text = "\n".join(p.extract_text() or "" for p in reader.pages)
+            if text.strip():
+                return text
+            st.warning("PDF file appears empty or is scanned. Please paste your resume instead.")
+            return ""
+        except ImportError:
+            st.error("PyPDF2 is not installed. Please paste your resume text instead.")
+            return ""
+        except Exception as e:
+            st.error(f"Could not read PDF file: {e}")
+            return ""
     return raw.decode("utf-8", errors="replace")
 
 
