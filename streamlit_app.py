@@ -508,7 +508,7 @@ def render_pricing():
                 &#10003;&nbsp; ATS + HR + LLM scoring<br>
                 &#10003;&nbsp; Detailed explanations<br>
                 &#10003;&nbsp; API key access<br>
-                &#10007;&nbsp; AI resume rewriting
+                &#10003;&nbsp; 10 AI rewrites/month
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -521,7 +521,7 @@ def render_pricing():
             <hr style="border-color: #a855f7; margin: 16px 0;">
             <div style="text-align: left; color: #94a3b8; font-size: 14px; line-height: 2;">
                 &#10003;&nbsp; Everything in Pro<br>
-                &#10003;&nbsp; AI resume rewriting<br>
+                &#10003;&nbsp; Unlimited AI rewrites<br>
                 &#10003;&nbsp; Before/after scoring<br>
                 &#10003;&nbsp; Download tailored DOCX<br>
                 &#10003;&nbsp; Change tracking
@@ -539,9 +539,9 @@ def page_scorer():
     )
 
     # Free scores counter / Pro LLM toggle
-    is_pro = is_authenticated() and st.session_state.user and st.session_state.user.get("tier") == "pro"
+    is_paid = is_authenticated() and st.session_state.user and st.session_state.user.get("tier") in ("pro", "ultra")
 
-    if is_pro:
+    if is_paid:
         use_llm = st.toggle("Include LLM Analysis (Pro)", value=True, help="Add Claude-powered AI analysis on top of ATS + HR scoring")
     else:
         use_llm = False
@@ -981,7 +981,7 @@ def render_llm_tab(llm_data: dict, blend_details: dict):
 # ─── Rewriter page (Ultra) ──────────────────────────────────────────────────
 
 def page_rewriter():
-    """Ultra tier: AI resume rewriting with before/after scores."""
+    """Pro + Ultra tier: AI resume rewriting with before/after scores."""
     st.markdown('<div class="section-title">AI Resume Rewriter</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="section-subtitle">Upload your resume and job description. '
@@ -989,19 +989,23 @@ def page_rewriter():
         unsafe_allow_html=True,
     )
 
-    is_ultra = is_authenticated() and st.session_state.user and st.session_state.user.get("tier") == "ultra"
+    user_tier = ""
+    if is_authenticated() and st.session_state.user:
+        user_tier = st.session_state.user.get("tier", "free")
 
-    if not is_ultra:
-        # Show upgrade prompt
+    can_rewrite = user_tier in ("pro", "ultra")
+
+    if not can_rewrite:
+        # Show upgrade prompt for free/anonymous users
         st.markdown("""
-        <div class="card-accent" style="text-align: center; border-color: #a855f7;">
-            <p style="color: #a855f7; font-weight: 700; font-size: 20px; margin-bottom: 8px;">
-                Ultra Feature
+        <div class="card-accent" style="text-align: center; border-color: #818cf8;">
+            <p style="color: #818cf8; font-weight: 700; font-size: 20px; margin-bottom: 8px;">
+                Pro Feature
             </p>
             <p style="color: #94a3b8; font-size: 15px; margin-bottom: 16px;">
-                AI resume rewriting is available on the Ultra plan ($29/month).
-                Claude AI will tailor your resume to match the job description while keeping
-                all your real experience, titles, and dates intact.
+                AI resume rewriting is available on Pro ($12/month, 10 rewrites) and
+                Ultra ($29/month, unlimited). Claude AI tailors your resume to match
+                the job description while keeping your real experience intact.
             </p>
             <p style="color: #94a3b8; font-size: 14px;">
                 &#10003; Before/after ATS + HR scores &nbsp;&nbsp;
@@ -1015,13 +1019,13 @@ def page_rewriter():
         _, cta_col, _ = st.columns([2, 3, 2])
         with cta_col:
             if not is_authenticated():
-                if st.button("Sign Up to Get Ultra", type="primary", use_container_width=True):
+                if st.button("Sign Up to Get Started", type="primary", use_container_width=True):
                     st.session_state.page = "register"
                     st.rerun()
             else:
-                if st.button("Upgrade to Ultra ($29/month)", type="primary", use_container_width=True):
+                if st.button("Upgrade to Pro ($12/month)", type="primary", use_container_width=True):
                     with st.spinner("Creating checkout session..."):
-                        result = api("POST", "/billing/checkout", {"tier": "ultra"}, token=st.session_state.token)
+                        result = api("POST", "/billing/checkout", {"tier": "pro"}, token=st.session_state.token)
                     if result["status"] == 200 and "checkout_url" in result["data"]:
                         st.link_button("Complete Payment on Stripe", result["data"]["checkout_url"], use_container_width=True)
                     elif result["status"] == 503:
@@ -1033,7 +1037,19 @@ def page_rewriter():
         render_pricing()
         return
 
-    # ─── Ultra user: show the rewriter ────────────────────────────────────
+    # ─── Pro / Ultra user: show the rewriter ──────────────────────────────
+    # Show remaining rewrites for Pro users
+    if user_tier == "pro":
+        usage = api("GET", "/auth/usage", token=st.session_state.token)
+        if usage["status"] == 200:
+            rewrites_info = usage["data"].get("rewrites", {})
+            remaining = rewrites_info.get("remaining", 10)
+            limit = rewrites_info.get("limit", 10)
+            st.markdown(
+                f'<div style="text-align: right; color: #94a3b8; font-size: 13px; margin-bottom: 12px;">'
+                f'Rewrites remaining: <strong style="color: #818cf8;">{remaining}/{limit}</strong> this month</div>',
+                unsafe_allow_html=True,
+            )
     col_resume, col_jd = st.columns(2)
     with col_resume:
         resume_text = st.text_area(
@@ -1259,18 +1275,32 @@ def page_dashboard():
         tier = user.get("tier", "free")
 
         # Metrics row
-        m1, m2, m3 = st.columns(3)
+        rewrites_info = stats.get("rewrites", {})
+        if tier in ("pro", "ultra"):
+            m1, m2, m3, m4 = st.columns(4)
+        else:
+            m1, m2, m3 = st.columns(3)
         with m1:
             st.metric("Total Scores", total_used)
         with m2:
             st.metric("Today", today_used)
         with m3:
-            if tier == "pro":
-                st.metric("Plan", "Pro (Unlimited)")
+            if tier == "ultra":
+                st.metric("Plan", "Ultra")
+            elif tier == "pro":
+                st.metric("Plan", "Pro")
             elif remaining is not None:
                 st.metric("Remaining", f"{remaining}/5")
             else:
                 st.metric("Remaining", "5")
+        if tier in ("pro", "ultra"):
+            with m4:
+                if tier == "ultra":
+                    st.metric("Rewrites", "Unlimited")
+                else:
+                    rw_remaining = rewrites_info.get("remaining", 10)
+                    rw_limit = rewrites_info.get("limit", 10)
+                    st.metric("Rewrites", f"{rw_remaining}/{rw_limit}")
 
         # Usage progress bar (free tier)
         if tier == "free" and remaining is not None:
@@ -1296,7 +1326,7 @@ def page_dashboard():
             st.markdown("""
             <div class="card-accent">
                 <p style="color: #818cf8; font-weight: 700; font-size: 16px; margin-bottom: 4px;">Pro — $12/month</p>
-                <p style="color: #94a3b8; font-size: 13px;">Unlimited scoring + LLM analysis</p>
+                <p style="color: #94a3b8; font-size: 13px;">Unlimited scoring + LLM analysis + 10 AI rewrites/month</p>
             </div>
             """, unsafe_allow_html=True)
             if st.button("Upgrade to Pro", use_container_width=True, type="primary", key="dash_pro"):
@@ -1312,7 +1342,7 @@ def page_dashboard():
             st.markdown("""
             <div class="card-accent" style="border-color: #a855f7;">
                 <p style="color: #a855f7; font-weight: 700; font-size: 16px; margin-bottom: 4px;">Ultra — $29/month</p>
-                <p style="color: #94a3b8; font-size: 13px;">Everything in Pro + AI resume rewriting</p>
+                <p style="color: #94a3b8; font-size: 13px;">Everything in Pro + unlimited AI rewrites</p>
             </div>
             """, unsafe_allow_html=True)
             if st.button("Upgrade to Ultra", use_container_width=True, type="primary", key="dash_ultra"):
@@ -1329,7 +1359,7 @@ def page_dashboard():
         st.markdown("""
         <div class="card-accent" style="border-color: #a855f7;">
             <p style="color: #a855f7; font-weight: 700; font-size: 16px; margin-bottom: 4px;">Upgrade to Ultra — $29/month</p>
-            <p style="color: #94a3b8; font-size: 13px;">Everything you have now + AI resume rewriting with before/after scores</p>
+            <p style="color: #94a3b8; font-size: 13px;">Everything you have now + unlimited AI rewrites (instead of 10/month)</p>
         </div>
         """, unsafe_allow_html=True)
         if st.button("Upgrade to Ultra", use_container_width=True, type="primary", key="dash_pro_to_ultra"):
