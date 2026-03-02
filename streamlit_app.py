@@ -1620,11 +1620,11 @@ def _make_resume_docx(resume_text: str, format_style: str = "ats") -> bytes:
         return run
 
     def _para(text, bold=False, size=None, sb=0, sa=2,
-              center=False, color=None, underline=False):
+              center=False, color=None, underline=False, italic=False):
         p = doc.add_paragraph()
         if center:
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        _add_run(p, text, bold=bold, size=size, color=color, underline=underline)
+        _add_run(p, text, bold=bold, size=size, color=color, underline=underline, italic=italic)
         p.paragraph_format.space_before = Pt(sb)
         p.paragraph_format.space_after = Pt(sa)
         return p
