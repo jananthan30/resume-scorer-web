@@ -2165,6 +2165,19 @@ def render_footer():
 
 
 def main():
+    # Auto-load saved resume once per session when restored from URL param.
+    # page_login() handles this on sign-in, but a page refresh skips login
+    # so we need to re-fetch here whenever the session is authenticated but
+    # the resume hasn't been loaded yet.
+    if (is_authenticated()
+            and not st.session_state.get("stored_resume")
+            and not st.session_state.get("_resume_checked")):
+        st.session_state._resume_checked = True
+        saved = _fetch_saved_resume(st.session_state.token)
+        if saved:
+            st.session_state.stored_resume = saved
+            st.session_state.resume_on_file = True
+
     render_nav()
 
     page = st.session_state.page
