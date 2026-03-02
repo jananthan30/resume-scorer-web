@@ -1515,6 +1515,42 @@ def page_dashboard():
             else:
                 st.error(result["data"].get("detail", "Billing portal unavailable."))
 
+    # ─── Claude Code Plugin setup (Pro / Ultra only) ─────────────────────
+    if tier in ("pro", "ultra"):
+        st.markdown("---")
+        st.markdown("##### Claude Code Plugin Setup")
+        st.markdown(
+            '<p style="color: #94a3b8; font-size: 13px;">'
+            "Generate an API key so your local Claude Code plugin uses your "
+            f"<strong style='color: #818cf8;'>{tier.title()}</strong> account for scoring."
+            "</p>",
+            unsafe_allow_html=True,
+        )
+
+        with st.form("plugin_apikey_form"):
+            label = st.text_input("Key label (optional)", placeholder="e.g. my-laptop")
+            create_key = st.form_submit_button("Generate Plugin API Key", type="primary")
+
+        if create_key:
+            with st.spinner("Generating..."):
+                result = api("POST", "/auth/api-key", {"label": label or "plugin"}, token=token)
+
+            if result["status"] == 200:
+                api_key = result["data"]["api_key"]
+                st.success("API key created. Copy it now — it won't be shown again.")
+                st.code(api_key, language=None)
+                st.markdown("**Add to your `.env` file in the Resume Builder folder:**")
+                st.code(f"SCORER_CLOUD_URL=https://resume-scorer.fly.dev\nSCORER_CLOUD_API_KEY={api_key}", language="bash")
+                st.markdown(
+                    '<p style="color: #94a3b8; font-size: 13px; margin-top: 8px;">'
+                    "After saving, restart the scorer server: "
+                    "<code>powershell -ExecutionPolicy Bypass -File restart_scorer.ps1</code>"
+                    "</p>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.error(result["data"].get("detail", "Failed to create API key."))
+
 
 
 # ─── Cover Letter page ───────────────────────────────────────────────────────
