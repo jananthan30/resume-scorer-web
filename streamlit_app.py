@@ -284,10 +284,18 @@ def _fetch_full_jd(job_url: str, job_title: str, token: str) -> tuple:
 def _apply_jd_prefill(jd_key: str, prefill_jd: str, job_url: str, job_title: str):
     """
     Called once per navigation from a job card.
-    Scrapes the full JD; falls back to the API snippet on failure.
+    Uses the API-provided description if it's substantial (Adzuna/Remotive block scrapers).
+    Only attempts URL scraping when the description is too short (<400 chars).
     Writes result into st.session_state[jd_key].
     Returns (final_jd_text, warning_message).
     """
+    # If we already have a good description from the API, use it directly.
+    # Adzuna and Remotive block scrapers on their detail pages so scraping adds no value.
+    if len(prefill_jd.strip()) >= 400:
+        st.session_state[jd_key] = prefill_jd
+        return prefill_jd, ""
+
+    # Description is too short — try scraping the original listing URL.
     if job_url and is_authenticated():
         with st.spinner("Fetching full job description from listing…"):
             full_jd, err = _fetch_full_jd(job_url, job_title, st.session_state.token)
@@ -297,6 +305,7 @@ def _apply_jd_prefill(jd_key: str, prefill_jd: str, job_url: str, job_title: str
         warn = err or "Could not fetch the full listing — showing the API snippet. You can paste the full JD below."
         st.session_state[jd_key] = prefill_jd
         return prefill_jd, warn
+
     st.session_state[jd_key] = prefill_jd
     return prefill_jd, ""
 
