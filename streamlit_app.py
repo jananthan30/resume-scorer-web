@@ -340,6 +340,10 @@ def render_nav():
         if st.button("Rewrite", use_container_width=True, type="primary" if st.session_state.page == "rewriter" else "secondary"):
             st.session_state.page = "rewriter"
             st.rerun()
+    with cols[4]:
+        if st.button("Cover Letter", use_container_width=True, type="primary" if st.session_state.page == "cover_letter" else "secondary"):
+            st.session_state.page = "cover_letter"
+            st.rerun()
     with cols[5]:
         if is_authenticated():
             if st.button("Dashboard", use_container_width=True, type="primary" if st.session_state.page == "dashboard" else "secondary"):
@@ -687,6 +691,8 @@ def page_scorer():
     # Pre-fill from Discover page handoff (if any)
     prefill_resume = st.session_state.pop("prefill_resume", "") or ""
     prefill_jd = st.session_state.pop("prefill_jd", "") or ""
+    if prefill_jd and "score_jd_text" not in st.session_state:
+        st.session_state["score_jd_text"] = prefill_jd
 
     # Input columns
     col_resume, col_jd = st.columns(2)
@@ -695,9 +701,9 @@ def page_scorer():
     with col_jd:
         jd_text = st.text_area(
             "Job Description",
-            value=prefill_jd,
             height=350,
             placeholder="Paste the job description here...\n\nInclude requirements, responsibilities, and qualifications.",
+            key="score_jd_text",
         )
 
     # Score button
@@ -1183,6 +1189,8 @@ def page_rewriter():
     # Pre-fill from Discover page handoff (if any)
     prefill_resume = st.session_state.pop("prefill_resume", "") or ""
     prefill_jd = st.session_state.pop("prefill_jd", "") or ""
+    if prefill_jd and "rewrite_jd_text" not in st.session_state:
+        st.session_state["rewrite_jd_text"] = prefill_jd
 
     col_resume, col_jd = st.columns(2)
     with col_resume:
@@ -1190,9 +1198,9 @@ def page_rewriter():
     with col_jd:
         jd_text = st.text_area(
             "Target Job Description",
-            value=prefill_jd,
             height=400,
             placeholder="Paste the job description you're applying for...",
+            key="rewrite_jd_text",
         )
 
     _, btn_col, _ = st.columns([3, 2, 3])
@@ -1624,6 +1632,8 @@ def page_cover_letter():
     # ─── Pro / Ultra user: show the generator ─────────────────────────────
     prefill_resume = st.session_state.pop("prefill_resume", "") or ""
     prefill_jd = st.session_state.pop("prefill_jd", "") or ""
+    if prefill_jd and "cover_jd_text" not in st.session_state:
+        st.session_state["cover_jd_text"] = prefill_jd
 
     col_resume, col_jd = st.columns(2)
     with col_resume:
@@ -1631,9 +1641,9 @@ def page_cover_letter():
     with col_jd:
         jd_text = st.text_area(
             "Target Job Description",
-            value=prefill_jd,
             height=350,
             placeholder="Paste the job description here...",
+            key="cover_jd_text",
         )
 
     _, btn_col, _ = st.columns([3, 2, 3])
