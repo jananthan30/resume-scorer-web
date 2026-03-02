@@ -748,7 +748,7 @@ def page_scorer():
     # Pre-fill from Discover page handoff (if any)
     prefill_resume = st.session_state.pop("prefill_resume", "") or ""
     prefill_jd = st.session_state.pop("prefill_jd", "") or ""
-    if prefill_jd and "score_jd_text" not in st.session_state:
+    if prefill_jd:
         st.session_state["score_jd_text"] = prefill_jd
 
     # Input columns
@@ -1246,7 +1246,7 @@ def page_rewriter():
     # Pre-fill from Discover page handoff (if any)
     prefill_resume = st.session_state.pop("prefill_resume", "") or ""
     prefill_jd = st.session_state.pop("prefill_jd", "") or ""
-    if prefill_jd and "rewrite_jd_text" not in st.session_state:
+    if prefill_jd:
         st.session_state["rewrite_jd_text"] = prefill_jd
 
     col_resume, col_jd = st.columns(2)
@@ -1699,7 +1699,7 @@ def page_cover_letter():
     # ─── Pro / Ultra user: show the generator ─────────────────────────────
     prefill_resume = st.session_state.pop("prefill_resume", "") or ""
     prefill_jd = st.session_state.pop("prefill_jd", "") or ""
-    if prefill_jd and "cover_jd_text" not in st.session_state:
+    if prefill_jd:
         st.session_state["cover_jd_text"] = prefill_jd
 
     col_resume, col_jd = st.columns(2)
