@@ -207,17 +207,21 @@ def is_authenticated() -> bool:
 
 def render_nav():
     """Top navigation bar."""
-    cols = st.columns([1, 1, 1, 1, 4])
+    cols = st.columns([1, 1, 1, 1, 1, 3])
 
     with cols[0]:
         if st.button("Home", use_container_width=True, type="primary" if st.session_state.page == "home" else "secondary"):
             st.session_state.page = "home"
             st.rerun()
     with cols[1]:
-        if st.button("Score Resume", use_container_width=True, type="primary" if st.session_state.page == "scorer" else "secondary"):
+        if st.button("Score", use_container_width=True, type="primary" if st.session_state.page == "scorer" else "secondary"):
             st.session_state.page = "scorer"
             st.rerun()
     with cols[2]:
+        if st.button("Rewrite", use_container_width=True, type="primary" if st.session_state.page == "rewriter" else "secondary"):
+            st.session_state.page = "rewriter"
+            st.rerun()
+    with cols[3]:
         if is_authenticated():
             if st.button("Dashboard", use_container_width=True, type="primary" if st.session_state.page == "dashboard" else "secondary"):
                 st.session_state.page = "dashboard"
@@ -226,7 +230,7 @@ def render_nav():
             if st.button("Login", use_container_width=True, type="primary" if st.session_state.page == "login" else "secondary"):
                 st.session_state.page = "login"
                 st.rerun()
-    with cols[3]:
+    with cols[4]:
         if is_authenticated():
             if st.button("Logout", use_container_width=True):
                 st.session_state.token = None
@@ -472,14 +476,14 @@ def page_home():
 
 
 def render_pricing():
-    """Pricing comparison section."""
+    """Pricing comparison section — Free / Pro / Ultra."""
     st.markdown('<div class="section-title" style="text-align: center;">Pricing</div>', unsafe_allow_html=True)
     st.markdown('<div class="section-subtitle" style="text-align: center;">Simple, transparent pricing</div>', unsafe_allow_html=True)
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown("""
-        <div class="card" style="text-align: center; min-height: 320px;">
+        <div class="card" style="text-align: center; min-height: 380px;">
             <p style="color: #94a3b8; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Free</p>
             <div class="price-tag">$0</div>
             <hr style="border-color: #334155; margin: 16px 0;">
@@ -487,24 +491,40 @@ def render_pricing():
                 &#10003;&nbsp; 5 total scores<br>
                 &#10003;&nbsp; ATS + HR scoring<br>
                 &#10003;&nbsp; Domain auto-detection<br>
-                &#10007;&nbsp; Detailed explanations<br>
-                &#10007;&nbsp; LLM-augmented scoring
+                &#10007;&nbsp; LLM-augmented scoring<br>
+                &#10007;&nbsp; AI resume rewriting
             </div>
         </div>
         """, unsafe_allow_html=True)
 
     with col2:
         st.markdown("""
-        <div class="card-accent" style="text-align: center; min-height: 320px;">
+        <div class="card-accent" style="text-align: center; min-height: 380px;">
             <p style="color: #818cf8; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Pro</p>
             <div class="price-tag">$12<span class="price-period">/month</span></div>
             <hr style="border-color: #6366f1; margin: 16px 0;">
             <div style="text-align: left; color: #94a3b8; font-size: 14px; line-height: 2;">
                 &#10003;&nbsp; Unlimited scores<br>
                 &#10003;&nbsp; ATS + HR + LLM scoring<br>
-                &#10003;&nbsp; Detailed explanations & quick wins<br>
+                &#10003;&nbsp; Detailed explanations<br>
                 &#10003;&nbsp; API key access<br>
-                &#10003;&nbsp; Priority support
+                &#10007;&nbsp; AI resume rewriting
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col3:
+        st.markdown("""
+        <div class="card-accent" style="text-align: center; min-height: 380px; border-color: #a855f7;">
+            <p style="color: #a855f7; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Ultra</p>
+            <div class="price-tag" style="color: #c084fc;">$29<span class="price-period">/month</span></div>
+            <hr style="border-color: #a855f7; margin: 16px 0;">
+            <div style="text-align: left; color: #94a3b8; font-size: 14px; line-height: 2;">
+                &#10003;&nbsp; Everything in Pro<br>
+                &#10003;&nbsp; AI resume rewriting<br>
+                &#10003;&nbsp; Before/after scoring<br>
+                &#10003;&nbsp; Download tailored DOCX<br>
+                &#10003;&nbsp; Change tracking
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -958,6 +978,170 @@ def render_llm_tab(llm_data: dict, blend_details: dict):
     st.markdown(f"**Model:** {llm_data.get('model_used', 'claude-sonnet-4-6')}")
 
 
+# ─── Rewriter page (Ultra) ──────────────────────────────────────────────────
+
+def page_rewriter():
+    """Ultra tier: AI resume rewriting with before/after scores."""
+    st.markdown('<div class="section-title">AI Resume Rewriter</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-subtitle">Upload your resume and job description. '
+        'Claude AI will tailor your resume and show before/after scores.</div>',
+        unsafe_allow_html=True,
+    )
+
+    is_ultra = is_authenticated() and st.session_state.user and st.session_state.user.get("tier") == "ultra"
+
+    if not is_ultra:
+        # Show upgrade prompt
+        st.markdown("""
+        <div class="card-accent" style="text-align: center; border-color: #a855f7;">
+            <p style="color: #a855f7; font-weight: 700; font-size: 20px; margin-bottom: 8px;">
+                Ultra Feature
+            </p>
+            <p style="color: #94a3b8; font-size: 15px; margin-bottom: 16px;">
+                AI resume rewriting is available on the Ultra plan ($29/month).
+                Claude AI will tailor your resume to match the job description while keeping
+                all your real experience, titles, and dates intact.
+            </p>
+            <p style="color: #94a3b8; font-size: 14px;">
+                &#10003; Before/after ATS + HR scores &nbsp;&nbsp;
+                &#10003; Download tailored resume &nbsp;&nbsp;
+                &#10003; Change tracking
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("")
+        _, cta_col, _ = st.columns([2, 3, 2])
+        with cta_col:
+            if not is_authenticated():
+                if st.button("Sign Up to Get Ultra", type="primary", use_container_width=True):
+                    st.session_state.page = "register"
+                    st.rerun()
+            else:
+                if st.button("Upgrade to Ultra ($29/month)", type="primary", use_container_width=True):
+                    with st.spinner("Creating checkout session..."):
+                        result = api("POST", "/billing/checkout", {"tier": "ultra"}, token=st.session_state.token)
+                    if result["status"] == 200 and "checkout_url" in result["data"]:
+                        st.link_button("Complete Payment on Stripe", result["data"]["checkout_url"], use_container_width=True)
+                    elif result["status"] == 503:
+                        st.warning("Stripe billing is not configured yet.")
+                    else:
+                        st.error(result["data"].get("detail", "Could not create checkout session."))
+
+        st.markdown("---")
+        render_pricing()
+        return
+
+    # ─── Ultra user: show the rewriter ────────────────────────────────────
+    col_resume, col_jd = st.columns(2)
+    with col_resume:
+        resume_text = st.text_area(
+            "Your Resume",
+            height=400,
+            placeholder="Paste your full resume text here...",
+            key="rewrite_resume_input",
+        )
+    with col_jd:
+        jd_text = st.text_area(
+            "Target Job Description",
+            height=400,
+            placeholder="Paste the job description you're applying for...",
+            key="rewrite_jd_input",
+        )
+
+    _, btn_col, _ = st.columns([3, 2, 3])
+    with btn_col:
+        rewrite_clicked = st.button("Rewrite My Resume", use_container_width=True, type="primary")
+
+    if rewrite_clicked:
+        if not resume_text or not jd_text:
+            st.error("Please paste both your resume and the job description.")
+            return
+        if len(resume_text.strip()) < 100:
+            st.warning("Resume seems too short. Please paste the full text.")
+            return
+
+        with st.spinner("AI is tailoring your resume... This may take 30-60 seconds."):
+            result = api("POST", "/rewrite", {
+                "resume_text": resume_text,
+                "jd_text": jd_text,
+            }, token=st.session_state.token)
+
+        if result["status"] != 200:
+            st.error(f"Rewrite failed: {result['data'].get('detail', 'Unknown error')}")
+            return
+
+        st.session_state.rewrite_result = result["data"]
+
+    # Display rewrite results
+    data = st.session_state.get("rewrite_result")
+    if data:
+        render_rewrite_results(data)
+
+
+def render_rewrite_results(data: dict):
+    """Show before/after scores, changes, and download button."""
+    original = data.get("original_scores", {})
+    rewritten = data.get("rewritten_scores", {})
+
+    st.markdown("---")
+
+    # ─── Before / After score comparison ──────────────────────────────────
+    st.markdown("##### Score Comparison")
+
+    score_col1, score_col2, score_col3, score_col4 = st.columns(4)
+    with score_col1:
+        st.metric("Original ATS", f"{original.get('ats', 0):.0f}%")
+    with score_col2:
+        ats_delta = rewritten.get("ats", 0) - original.get("ats", 0)
+        st.metric("Rewritten ATS", f"{rewritten.get('ats', 0):.0f}%", delta=f"{ats_delta:+.0f}%")
+    with score_col3:
+        st.metric("Original HR", f"{original.get('hr', 0):.0f}%")
+    with score_col4:
+        hr_delta = rewritten.get("hr", 0) - original.get("hr", 0)
+        st.metric("Rewritten HR", f"{rewritten.get('hr', 0):.0f}%", delta=f"{hr_delta:+.0f}%")
+
+    # Visual gauge comparison
+    g1, g2 = st.columns(2)
+    with g1:
+        st.plotly_chart(make_gauge(rewritten.get("ats", 0), "Rewritten ATS Score"), use_container_width=True)
+    with g2:
+        st.plotly_chart(make_gauge(rewritten.get("hr", 0), "Rewritten HR Score"), use_container_width=True)
+
+    # ─── Explanation ──────────────────────────────────────────────────────
+    explanation = data.get("explanation", "")
+    if explanation:
+        st.markdown("##### Tailoring Strategy")
+        st.info(explanation)
+
+    # ─── Changes made ─────────────────────────────────────────────────────
+    changes = data.get("changes_made", [])
+    if changes:
+        st.markdown("##### Changes Made")
+        for change in changes:
+            st.markdown(f"- {change}")
+
+    # ─── Rewritten resume text ────────────────────────────────────────────
+    rewritten_text = data.get("rewritten_resume", "")
+    if rewritten_text:
+        st.markdown("---")
+        st.markdown("##### Tailored Resume")
+        st.text_area("Copy your tailored resume", value=rewritten_text, height=400, key="rewritten_output")
+
+        # Download as .txt
+        st.download_button(
+            label="Download Tailored Resume (.txt)",
+            data=rewritten_text,
+            file_name="tailored_resume.txt",
+            mime="text/plain",
+            use_container_width=True,
+            type="primary",
+        )
+
+    st.markdown(f"**Model:** {data.get('model_used', 'claude-sonnet-4-6')}")
+
+
 # ─── Auth pages ──────────────────────────────────────────────────────────────
 
 def page_register():
@@ -1107,32 +1291,56 @@ def page_dashboard():
     # Upgrade / Billing section
     tier = user.get("tier", "free")
     if tier == "free":
+        up1, up2 = st.columns(2)
+        with up1:
+            st.markdown("""
+            <div class="card-accent">
+                <p style="color: #818cf8; font-weight: 700; font-size: 16px; margin-bottom: 4px;">Pro — $12/month</p>
+                <p style="color: #94a3b8; font-size: 13px;">Unlimited scoring + LLM analysis</p>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("Upgrade to Pro", use_container_width=True, type="primary", key="dash_pro"):
+                with st.spinner("Creating checkout session..."):
+                    result = api("POST", "/billing/checkout", {"tier": "pro"}, token=token)
+                if result["status"] == 200 and "checkout_url" in result["data"]:
+                    st.link_button("Pay on Stripe", result["data"]["checkout_url"], use_container_width=True)
+                elif result["status"] == 503:
+                    st.warning("Stripe billing is not configured yet.")
+                else:
+                    st.error(result["data"].get("detail", "Checkout failed."))
+        with up2:
+            st.markdown("""
+            <div class="card-accent" style="border-color: #a855f7;">
+                <p style="color: #a855f7; font-weight: 700; font-size: 16px; margin-bottom: 4px;">Ultra — $29/month</p>
+                <p style="color: #94a3b8; font-size: 13px;">Everything in Pro + AI resume rewriting</p>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("Upgrade to Ultra", use_container_width=True, type="primary", key="dash_ultra"):
+                with st.spinner("Creating checkout session..."):
+                    result = api("POST", "/billing/checkout", {"tier": "ultra"}, token=token)
+                if result["status"] == 200 and "checkout_url" in result["data"]:
+                    st.link_button("Pay on Stripe", result["data"]["checkout_url"], use_container_width=True)
+                elif result["status"] == 503:
+                    st.warning("Stripe billing is not configured yet.")
+                else:
+                    st.error(result["data"].get("detail", "Checkout failed."))
+
+    elif tier == "pro":
         st.markdown("""
-        <div class="card-accent">
-            <p style="color: #818cf8; font-weight: 700; font-size: 18px; margin-bottom: 8px;">
-                Upgrade to Pro
-            </p>
-            <p style="color: #94a3b8; font-size: 14px; margin-bottom: 16px;">
-                $12/month &mdash; Unlimited ATS + HR + LLM scoring, detailed explanations,
-                API key access, and priority support. Cancel anytime.
-            </p>
+        <div class="card-accent" style="border-color: #a855f7;">
+            <p style="color: #a855f7; font-weight: 700; font-size: 16px; margin-bottom: 4px;">Upgrade to Ultra — $29/month</p>
+            <p style="color: #94a3b8; font-size: 13px;">Everything you have now + AI resume rewriting with before/after scores</p>
         </div>
         """, unsafe_allow_html=True)
-
-        if st.button("Upgrade to Pro", use_container_width=True, type="primary"):
+        if st.button("Upgrade to Ultra", use_container_width=True, type="primary", key="dash_pro_to_ultra"):
             with st.spinner("Creating checkout session..."):
-                result = api("POST", "/billing/checkout", token=token)
-
+                result = api("POST", "/billing/checkout", {"tier": "ultra"}, token=token)
             if result["status"] == 200 and "checkout_url" in result["data"]:
-                st.link_button(
-                    "Complete Payment on Stripe",
-                    result["data"]["checkout_url"],
-                    use_container_width=True,
-                )
+                st.link_button("Pay on Stripe", result["data"]["checkout_url"], use_container_width=True)
             elif result["status"] == 503:
                 st.warning("Stripe billing is not configured yet.")
             else:
-                st.error(result["data"].get("detail", "Could not create checkout session."))
+                st.error(result["data"].get("detail", "Checkout failed."))
     else:
         st.markdown("##### Manage Subscription")
         if st.button("Open Billing Portal", use_container_width=True):
@@ -1193,6 +1401,8 @@ def main():
         page_home()
     elif page == "scorer":
         page_scorer()
+    elif page == "rewriter":
+        page_rewriter()
     elif page == "register":
         page_register()
     elif page == "login":
