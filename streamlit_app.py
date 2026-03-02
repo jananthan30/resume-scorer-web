@@ -719,7 +719,7 @@ def render_ats_tab(ats: dict, ats_explanation: dict):
 
     # Domain detection
     domain = ats.get("domain", "")
-    if domain:
+    if domain and isinstance(domain, str):
         st.markdown(f"**Detected Domain:** {domain.replace('_', ' ').title()}")
 
     # Readability
