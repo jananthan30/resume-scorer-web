@@ -2225,11 +2225,123 @@ def page_cover_letter():
             return
 
         st.session_state.cover_letter_result = result["data"]
+        st.session_state.cover_letter_resume_text = resume_text
 
     # Display result
     data = st.session_state.get("cover_letter_result")
     if data:
         render_cover_letter_result(data)
+
+
+def _parse_sender_info(resume_text: str):
+    """Extract sender name and contact line from the top of a plain-text resume."""
+    import re
+    lines = [l.strip() for l in resume_text.splitlines() if l.strip()]
+    name = ""
+    contact = ""
+    for i, line in enumerate(lines[:5]):
+        # First non-empty line is the name — strip markdown # prefix if present
+        if not name:
+            name = re.sub(r"^#+\s*", "", line).strip()
+            continue
+        # Second line: looks like contact info (contains | or @ or phone digits)
+        if re.search(r"[@|]|\d{3}[-.\s]\d{3}", line):
+            contact = line
+            break
+    return name, contact
+
+
+def _make_cover_letter_docx(
+    paragraphs: list,
+    sender_name: str,
+    sender_contact: str,
+    company: str,
+    job_title: str,
+) -> bytes:
+    """Build a one-page professional cover letter DOCX."""
+    import io
+    from datetime import date
+    from docx import Document
+    from docx.shared import Pt, Inches, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    doc = Document()
+
+    # ── Page setup: 1" margins, Letter size ──────────────────────────────────
+    for section in doc.sections:
+        section.top_margin    = Inches(1.0)
+        section.bottom_margin = Inches(1.0)
+        section.left_margin   = Inches(1.1)
+        section.right_margin  = Inches(1.1)
+
+    FONT = "Calibri"
+    BODY_PT = 11
+
+    def _run(para, text, bold=False, size=BODY_PT, color=None):
+        run = para.add_run(text)
+        run.bold = bold
+        run.font.name = FONT
+        run.font.size = Pt(size)
+        if color:
+            run.font.color.rgb = RGBColor(*color)
+        return run
+
+    def _blank(space_after=4):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(space_after)
+
+    def _body(text, space_after=10):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(space_after)
+        _run(p, text)
+        return p
+
+    # ── Sender block (top-left) ───────────────────────────────────────────────
+    name_para = doc.add_paragraph()
+    name_para.paragraph_format.space_before = Pt(0)
+    name_para.paragraph_format.space_after  = Pt(2)
+    _run(name_para, sender_name or "Applicant Name", bold=True, size=13)
+
+    if sender_contact:
+        contact_para = doc.add_paragraph()
+        contact_para.paragraph_format.space_before = Pt(0)
+        contact_para.paragraph_format.space_after  = Pt(0)
+        _run(contact_para, sender_contact, size=10, color=(71, 85, 105))
+
+    _blank(space_after=8)
+
+    # ── Date ─────────────────────────────────────────────────────────────────
+    today = date.today().strftime("%B %d, %Y")
+    _body(today, space_after=8)
+
+    # ── Recipient block ───────────────────────────────────────────────────────
+    _body("Hiring Manager")
+    if company:
+        _body(company, space_after=8)
+    else:
+        _blank(space_after=8)
+
+    # ── Salutation ────────────────────────────────────────────────────────────
+    _body("Dear Hiring Manager,", space_after=10)
+
+    # ── Body paragraphs ───────────────────────────────────────────────────────
+    for para_text in paragraphs:
+        if para_text.strip():
+            _body(para_text.strip(), space_after=10)
+
+    # ── Closing ───────────────────────────────────────────────────────────────
+    _blank(space_after=4)
+    _body("Sincerely,", space_after=40)   # space for handwritten signature
+    _body(sender_name or "Applicant Name", space_after=2)
+    if job_title:
+        _run(doc.add_paragraph(), job_title, size=10, color=(71, 85, 105))
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
 
 
 def render_cover_letter_result(data: dict):
@@ -2263,17 +2375,46 @@ def render_cover_letter_result(data: dict):
 
     # Copy/download
     st.markdown("---")
-    action_cols = st.columns([1, 1, 2])
-    with action_cols[0]:
-        st.download_button(
-            "Download as .txt",
-            data=full_text,
-            file_name=f"Cover_Letter_{company.replace(' ', '_')}.txt" if company else "Cover_Letter.txt",
-            mime="text/plain",
-            use_container_width=True,
+    resume_text_for_cl = st.session_state.get("cover_letter_resume_text", "")
+    sender_name, sender_contact = _parse_sender_info(resume_text_for_cl)
+
+    try:
+        docx_bytes = _make_cover_letter_docx(
+            paragraphs=paragraphs,
+            sender_name=sender_name,
+            sender_contact=sender_contact,
+            company=company,
+            job_title=title,
         )
-    with action_cols[1]:
-        st.code(full_text, language=None)
+        safe_company = company.replace(" ", "_") if company else "CoverLetter"
+        action_cols = st.columns([1, 1, 2])
+        with action_cols[0]:
+            st.download_button(
+                "Download as .docx",
+                data=docx_bytes,
+                file_name=f"Cover_Letter_{safe_company}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+                type="primary",
+            )
+        with action_cols[1]:
+            st.download_button(
+                "Download as .txt",
+                data=full_text,
+                file_name=f"Cover_Letter_{safe_company}.txt",
+                mime="text/plain",
+                use_container_width=True,
+            )
+    except Exception:
+        action_cols = st.columns([1, 3])
+        with action_cols[0]:
+            st.download_button(
+                "Download as .txt",
+                data=full_text,
+                file_name=f"Cover_Letter_{company.replace(' ', '_') if company else 'CoverLetter'}.txt",
+                mime="text/plain",
+                use_container_width=True,
+            )
 
 
 # ─── Job Discovery page ──────────────────────────────────────────────────────
