@@ -1729,7 +1729,7 @@ def page_discover():
                 "max_results": max_results,
             }, token=st.session_state.token)
 
-            if result["ok"]:
+            if result["status"] == 200:
                 data = result["data"]
                 if data.get("setup_required"):
                     st.info(data.get("message", "API keys required for job discovery."))
