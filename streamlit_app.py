@@ -49,6 +49,7 @@ _defaults = {
     "prefill_jd": "",
     "prefill_job_url": "",
     "prefill_job_title": "",
+    "prefill_company": "",
     "discover_results": None,
     "stored_resume": "",  # Saved resume text persists across pages
     "resume_on_file": False,  # True when resume is persisted in cloud DB
@@ -503,7 +504,7 @@ def resume_input(label: str = "Your Resume", prefill: str = "", key_prefix: str 
 
 def render_nav():
     """Top navigation bar."""
-    cols = st.columns([1, 1, 1, 1, 1, 1, 2])
+    cols = st.columns([1, 1, 1, 1, 1, 1, 1, 2])
 
     with cols[0]:
         if st.button("Home", use_container_width=True, type="primary" if st.session_state.page == "home" else "secondary"):
@@ -527,6 +528,13 @@ def render_nav():
             st.rerun()
     with cols[5]:
         if is_authenticated():
+            if st.button("Tracker", use_container_width=True, type="primary" if st.session_state.page == "tracker" else "secondary"):
+                st.session_state.page = "tracker"
+                st.rerun()
+        else:
+            st.button("Tracker", use_container_width=True, disabled=True, help="Sign in to use the Job Tracker")
+    with cols[6]:
+        if is_authenticated():
             if st.button("Dashboard", use_container_width=True, type="primary" if st.session_state.page == "dashboard" else "secondary"):
                 st.session_state.page = "dashboard"
                 st.rerun()
@@ -534,7 +542,7 @@ def render_nav():
             if st.button("Login", use_container_width=True, type="primary" if st.session_state.page == "login" else "secondary"):
                 st.session_state.page = "login"
                 st.rerun()
-    with cols[6]:
+    with cols[7]:
         if is_authenticated():
             if st.button("Logout", use_container_width=True):
                 st.query_params.clear()
@@ -1419,10 +1427,28 @@ def page_rewriter():
     prefill_jd = st.session_state.pop("prefill_jd", "") or ""
     prefill_job_url = st.session_state.pop("prefill_job_url", "") or ""
     prefill_job_title = st.session_state.pop("prefill_job_title", "") or ""
+    prefill_company = st.session_state.pop("prefill_company", "") or ""
     if prefill_jd or prefill_job_url:
         prefill_jd, jd_warn = _apply_jd_prefill("rewrite_jd_text", prefill_jd, prefill_job_url, prefill_job_title)
         if jd_warn:
             st.warning(f"⚠ {jd_warn}")
+
+    # Company + job title fields (used for file naming and tracker)
+    _info_col1, _info_col2 = st.columns(2)
+    with _info_col1:
+        _company_input = st.text_input(
+            "Company Name",
+            value=st.session_state.get("rewrite_company_val", prefill_company),
+            placeholder="e.g. Pfizer, Google, Mayo Clinic…",
+            key="rewrite_company_input",
+        )
+    with _info_col2:
+        _job_title_input = st.text_input(
+            "Job Title",
+            value=st.session_state.get("rewrite_job_title_val", prefill_job_title),
+            placeholder="e.g. Data Scientist, Clinical Research Associate…",
+            key="rewrite_job_title_input",
+        )
 
     col_resume, col_jd = st.columns(2)
     with col_resume:
@@ -1492,7 +1518,8 @@ def page_rewriter():
         _stage_labels = {
             "scoring_original":  "Scoring your original resume…",
             "rewriting":         f"Claude AI is rewriting in {_fmt_name} format…",
-            "scoring_rewritten": "Scoring the tailored resume…",
+            "scoring_rewritten": "Scoring the tailored resume (ATS + HR)…",
+            "scoring_llm":       "Running LLM evaluation…",
         }
         _status_box = st.empty()
         _pbar = st.progress(0)
@@ -1535,6 +1562,9 @@ def page_rewriter():
             return
 
         st.session_state.rewrite_result = _rewrite_result
+        st.session_state.rewrite_jd_text = jd_text
+        st.session_state.rewrite_company_val = _company_input
+        st.session_state.rewrite_job_title_val = _job_title_input
         st.rerun()
 
     # Display rewrite results
@@ -1756,10 +1786,18 @@ def render_rewrite_results(data: dict):
     original = data.get("original_scores", {})
     rewritten = data.get("rewritten_scores", {})
 
+    # Company / job title stored when rewrite was triggered
+    company = st.session_state.get("rewrite_company_val", "")
+    job_title = st.session_state.get("rewrite_job_title_val", "")
+
     st.markdown("---")
 
     # ─── Before / After score comparison ──────────────────────────────────
     st.markdown("##### Score Comparison")
+
+    llm_ats = rewritten.get("llm_ats", 0)
+    llm_hr = rewritten.get("llm_hr", 0)
+    has_llm = llm_ats > 0 or llm_hr > 0
 
     score_col1, score_col2, score_col3, score_col4 = st.columns(4)
     with score_col1:
@@ -1773,12 +1811,23 @@ def render_rewrite_results(data: dict):
         hr_delta = rewritten.get("hr", 0) - original.get("hr", 0)
         st.metric("Rewritten HR", f"{rewritten.get('hr', 0):.0f}%", delta=f"{hr_delta:+.0f}%")
 
+    if has_llm:
+        llm_col1, llm_col2, _ = st.columns(3)
+        with llm_col1:
+            st.metric("LLM ATS", f"{llm_ats:.0f}%", help="Claude's independent ATS assessment")
+        with llm_col2:
+            st.metric("LLM HR", f"{llm_hr:.0f}%", help="Claude's independent HR recruiter assessment")
+
     # Visual gauge comparison
-    g1, g2 = st.columns(2)
-    with g1:
+    gauge_cols = st.columns(3) if has_llm else st.columns(2)
+    with gauge_cols[0]:
         st.plotly_chart(make_gauge(rewritten.get("ats", 0), "Rewritten ATS Score"), use_container_width=True)
-    with g2:
+    with gauge_cols[1]:
         st.plotly_chart(make_gauge(rewritten.get("hr", 0), "Rewritten HR Score"), use_container_width=True)
+    if has_llm:
+        with gauge_cols[2]:
+            llm_avg = (llm_ats + llm_hr) / 2
+            st.plotly_chart(make_gauge(llm_avg, "LLM Overall Score"), use_container_width=True)
 
     # ─── Explanation ──────────────────────────────────────────────────────
     explanation = data.get("explanation", "")
@@ -1807,6 +1856,15 @@ def render_rewrite_results(data: dict):
         }
         fmt_label = fmt_labels.get(fmt_style, "ATS Standard")
 
+        # Build a descriptive filename: Company_JobTitle_Resume_style.docx
+        def _safe(s: str) -> str:
+            import re
+            return re.sub(r"[^\w\-]", "_", s.strip()).strip("_") if s.strip() else ""
+
+        _name_parts = [p for p in [_safe(company), _safe(job_title), "Resume", fmt_style] if p]
+        _docx_name = "_".join(_name_parts) + ".docx"
+        _txt_name = "_".join(_name_parts[:-1] + ["Resume"]) + ".txt" if _name_parts else "tailored_resume.txt"
+
         dl_col, _ = st.columns([2, 3])
         with dl_col:
             try:
@@ -1814,7 +1872,7 @@ def render_rewrite_results(data: dict):
                 st.download_button(
                     label=f"Download — {fmt_label} (.docx)",
                     data=docx_bytes,
-                    file_name=f"tailored_resume_{fmt_style}.docx",
+                    file_name=_docx_name,
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True,
                     type="primary",
@@ -1823,11 +1881,33 @@ def render_rewrite_results(data: dict):
                 st.download_button(
                     label="Download Tailored Resume (.txt)",
                     data=rewritten_text,
-                    file_name="tailored_resume.txt",
+                    file_name=_txt_name,
                     mime="text/plain",
                     use_container_width=True,
                     type="primary",
                 )
+
+    # ─── Auto-add to tracker (once per rewrite result) ────────────────────
+    if is_authenticated() and company and rewritten_text:
+        _tracker_key = f"tracker_saved_{id(data)}"
+        if not st.session_state.get(_tracker_key):
+            _resume_fname = _docx_name if rewritten_text else ""
+            _tracker_resp = api(
+                "POST", "/tracker/add",
+                {
+                    "company": company,
+                    "job_title": job_title,
+                    "status": "Applied",
+                    "resume_file": _resume_fname,
+                    "ats_score": rewritten.get("ats", 0),
+                    "hr_score": rewritten.get("hr", 0),
+                    "llm_score": rewritten.get("llm_hr", 0),
+                },
+                token=st.session_state.token,
+            )
+            if _tracker_resp.get("status") in (200, 201) or _tracker_resp.get("data", {}).get("id"):
+                st.session_state[_tracker_key] = True
+                st.success(f"Saved to Job Tracker — {company} · {job_title}")
 
     st.markdown(f"**Model:** {data.get('model_used', 'claude-sonnet-4-6')}")
 
@@ -2233,6 +2313,39 @@ def page_cover_letter():
         render_cover_letter_result(data)
 
 
+def _extract_jd_meta(jd_text: str):
+    """Extract job title and company from JD text using lightweight heuristics."""
+    import re
+    lines = [l.strip() for l in jd_text.splitlines() if l.strip()]
+    title, company = "", ""
+    # Job title: first non-URL line under 80 chars that doesn't end in a period
+    for line in lines[:8]:
+        if len(line) < 80 and not line.startswith("http") and not line.endswith("."):
+            title = line
+            break
+    # Company: look for "Company: X", "About X", "Employer: X" patterns
+    for line in lines[:30]:
+        m = re.match(r'(?:company|employer|organization)[:\s-]+(.+)', line, re.I)
+        if m:
+            company = m.group(1).strip()[:60]
+            break
+        m = re.match(r'about\s+([\w\s&,\.\-]+?)(?:\s*[-|]|$)', line, re.I)
+        if m:
+            candidate = m.group(1).strip()
+            if 2 < len(candidate) < 60 and not any(
+                w in candidate.lower() for w in ["us ", "the role", "this role", "you "]
+            ):
+                company = candidate
+                break
+    return title.strip(), company.strip()
+
+
+def _safe_filename(s: str, maxlen: int = 30) -> str:
+    """Sanitise a string for use in a filename."""
+    import re
+    return re.sub(r'[^\w\-]', '_', s).strip('_')[:maxlen]
+
+
 def _parse_sender_info(resume_text: str):
     """Extract sender name and contact line from the top of a plain-text resume."""
     import re
@@ -2386,13 +2499,17 @@ def render_cover_letter_result(data: dict):
             company=company,
             job_title=title,
         )
-        safe_company = company.replace(" ", "_") if company else "CoverLetter"
+        import re as _re
+        def _cl_safe(s: str) -> str:
+            return _re.sub(r"[^\w\-]", "_", s.strip()).strip("_") if s and s.strip() else ""
+        _cl_parts = [p for p in [_cl_safe(company), _cl_safe(title), "Cover_Letter"] if p]
+        _cl_base = "_".join(_cl_parts) if _cl_parts else "Cover_Letter"
         action_cols = st.columns([1, 1, 2])
         with action_cols[0]:
             st.download_button(
                 "Download as .docx",
                 data=docx_bytes,
-                file_name=f"Cover_Letter_{safe_company}.docx",
+                file_name=f"{_cl_base}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 use_container_width=True,
                 type="primary",
@@ -2401,17 +2518,19 @@ def render_cover_letter_result(data: dict):
             st.download_button(
                 "Download as .txt",
                 data=full_text,
-                file_name=f"Cover_Letter_{safe_company}.txt",
+                file_name=f"{_cl_base}.txt",
                 mime="text/plain",
                 use_container_width=True,
             )
     except Exception:
+        import re as _re
+        _fb = _re.sub(r"[^\w\-]", "_", company.strip()).strip("_") if company and company.strip() else "CoverLetter"
         action_cols = st.columns([1, 3])
         with action_cols[0]:
             st.download_button(
                 "Download as .txt",
                 data=full_text,
-                file_name=f"Cover_Letter_{company.replace(' ', '_') if company else 'CoverLetter'}.txt",
+                file_name=f"{_fb}_Cover_Letter.txt",
                 mime="text/plain",
                 use_container_width=True,
             )
@@ -2519,6 +2638,7 @@ def render_job_card(rank: int, job: dict, resume_text: str = ""):
     # listing_url = Adzuna /details/{id} page (scrapeable); url = employer redirect
     job_url = job.get("listing_url", "") or job.get("url", "")
     job_title_nav = job.get("title", "")
+    company_nav = job.get("company", "")
 
     with btn_cols[1]:
         if st.button("Score", key=f"score_{rank}", use_container_width=True):
@@ -2526,6 +2646,7 @@ def render_job_card(rank: int, job: dict, resume_text: str = ""):
             st.session_state.prefill_jd = jd_text
             st.session_state.prefill_job_url = job_url
             st.session_state.prefill_job_title = job_title_nav
+            st.session_state.prefill_company = company_nav
             st.session_state.page = "scorer"
             st.rerun()
 
@@ -2535,6 +2656,7 @@ def render_job_card(rank: int, job: dict, resume_text: str = ""):
             st.session_state.prefill_jd = jd_text
             st.session_state.prefill_job_url = job_url
             st.session_state.prefill_job_title = job_title_nav
+            st.session_state.prefill_company = company_nav
             st.session_state.page = "rewriter"
             st.rerun()
 
@@ -2544,6 +2666,7 @@ def render_job_card(rank: int, job: dict, resume_text: str = ""):
             st.session_state.prefill_jd = jd_text
             st.session_state.prefill_job_url = job_url
             st.session_state.prefill_job_title = job_title_nav
+            st.session_state.prefill_company = company_nav
             st.session_state.page = "cover_letter"
             st.rerun()
 
@@ -2677,6 +2800,83 @@ def page_discover():
             )
 
 
+# ─── Job Tracker page ────────────────────────────────────────────────────────
+
+_TRACKER_STATUSES = ["Applied", "Waiting", "Interview Scheduled", "Interviewed", "Offer", "Rejected", "Withdrawn"]
+
+
+def page_tracker():
+    """Job application tracker — requires login."""
+    st.markdown('<div class="section-title">Job Application Tracker</div>', unsafe_allow_html=True)
+
+    if not is_authenticated():
+        st.warning("Please sign in to view your job tracker.")
+        if st.button("Sign In", type="primary"):
+            st.session_state.page = "login"
+            st.rerun()
+        return
+
+    result = api("GET", "/tracker", token=st.session_state.token)
+    if result["status"] != 200:
+        st.error("Could not load tracker — tracker may be unavailable on the free tier.")
+        return
+
+    apps = result.get("data", {}).get("applications", [])
+
+    if not apps:
+        st.info("No applications tracked yet. Rewrite a resume and it will appear here automatically.")
+        return
+
+    st.markdown(f"**{len(apps)} application{'s' if len(apps) != 1 else ''}** tracked")
+    st.markdown("---")
+
+    # Header row
+    _hcols = st.columns([2, 2, 1.4, 1, 1, 1, 1.8])
+    for _hc, _hl in zip(_hcols, ["Company", "Job Title", "Date", "ATS", "HR", "LLM", "Status"]):
+        _hc.markdown(f"**{_hl}**")
+    st.markdown("---")
+
+    for app in apps:
+        _entry_id = app["id"]
+        _company = app.get("company", "")
+        _title = app.get("job_title", "")
+        _date = (app.get("created_at") or "")[:10]
+        _ats = app.get("ats_score") or 0
+        _hr = app.get("hr_score") or 0
+        _llm = app.get("llm_score") or 0
+        _status = app.get("status", "Applied")
+
+        _cols = st.columns([2, 2, 1.4, 1, 1, 1, 1.8])
+        _cols[0].markdown(_company or "—")
+        _cols[1].markdown(_title or "—")
+        _cols[2].markdown(_date or "—")
+        # Colour-coded score badges
+        def _score_badge(val: float) -> str:
+            if val <= 0:
+                return "—"
+            col = "#22c55e" if val >= 70 else "#eab308" if val >= 50 else "#ef4444"
+            return f'<span style="color:{col};font-weight:700;">{val:.0f}%</span>'
+        _cols[3].markdown(_score_badge(_ats), unsafe_allow_html=True)
+        _cols[4].markdown(_score_badge(_hr), unsafe_allow_html=True)
+        _cols[5].markdown(_score_badge(_llm), unsafe_allow_html=True)
+
+        # Inline status dropdown — updates on change
+        _new_status = _cols[6].selectbox(
+            label="",
+            options=_TRACKER_STATUSES,
+            index=_TRACKER_STATUSES.index(_status) if _status in _TRACKER_STATUSES else 0,
+            key=f"tracker_status_{_entry_id}",
+            label_visibility="collapsed",
+        )
+        if _new_status != _status:
+            api(
+                "PUT", f"/tracker/{_entry_id}",
+                {"status": _new_status},
+                token=st.session_state.token,
+            )
+            st.rerun()
+
+
 # ─── Main router ─────────────────────────────────────────────────────────────
 
 def render_footer():
@@ -2720,6 +2920,8 @@ def main():
         page_cover_letter()
     elif page == "rewriter":
         page_rewriter()
+    elif page == "tracker":
+        page_tracker()
     elif page == "register":
         page_register()
     elif page == "login":
