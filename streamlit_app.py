@@ -1626,15 +1626,16 @@ def render_job_card(rank: int, job: dict, resume_text: str = ""):
         bc = badge_colors.get(rec, "#94a3b8")
         rec_badge = f'<span style="background: {bc}22; color: {bc}; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{rec}</span>'
 
+    import html as _html
     matched_kw = job.get("ats_detail", {}).get("matched_keywords", [])
     missing_kw = job.get("ats_detail", {}).get("missing_keywords", [])
 
     matched_chips = " ".join(
-        f'<span style="background: #22c55e22; color: #22c55e; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin: 1px;">{kw}</span>'
+        f'<span style="background: #22c55e22; color: #22c55e; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin: 1px;">{_html.escape(str(kw))}</span>'
         for kw in matched_kw[:8]
     )
     missing_chips = " ".join(
-        f'<span style="background: #ef444422; color: #ef4444; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin: 1px;">{kw}</span>'
+        f'<span style="background: #ef444422; color: #ef4444; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin: 1px;">{_html.escape(str(kw))}</span>'
         for kw in missing_kw[:5]
     )
 
@@ -1643,7 +1644,7 @@ def render_job_card(rank: int, job: dict, resume_text: str = ""):
         <div style="display: flex; justify-content: space-between; align-items: start;">
             <div>
                 <span style="color: #818cf8; font-weight: 700; font-size: 14px;">#{rank}</span>
-                <span style="color: #e2e8f0; font-weight: 600; font-size: 16px; margin-left: 8px;">{job.get('title', 'Unknown')}</span>
+                <span style="color: #e2e8f0; font-weight: 600; font-size: 16px; margin-left: 8px;">{_html.escape(job.get('title', 'Unknown'))}</span>
                 {rec_badge}
             </div>
             <div style="text-align: right;">
@@ -1653,7 +1654,7 @@ def render_job_card(rank: int, job: dict, resume_text: str = ""):
             </div>
         </div>
         <div style="margin-top: 6px; color: #94a3b8; font-size: 14px;">
-            <strong>{job.get('company', '')}</strong> &nbsp;&bull;&nbsp; {job.get('location', '')}
+            <strong>{_html.escape(job.get('company', ''))}</strong> &nbsp;&bull;&nbsp; {_html.escape(job.get('location', ''))}
             {f' &nbsp;&bull;&nbsp; <span style="color: #818cf8;">{salary_text}</span>' if salary_text else ''}
             {f' &nbsp;&bull;&nbsp; Posted: {job.get("posted_date", "")}' if job.get("posted_date") else ''}
         </div>
