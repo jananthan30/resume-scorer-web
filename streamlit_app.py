@@ -45,6 +45,7 @@ _defaults = {
     "prefill_jd": "",
     "discover_results": None,
     "stored_resume": "",  # Saved resume text persists across pages
+    "resume_on_file": False,  # True when resume is persisted in cloud DB
 }
 for key, val in _defaults.items():
     if key not in st.session_state:
@@ -197,6 +198,8 @@ def api(method: str, endpoint: str, json_data: dict = None, token: str = None) -
     try:
         if method == "GET":
             r = requests.get(url, headers=headers, timeout=30)
+        elif method == "DELETE":
+            r = requests.delete(url, headers=headers, timeout=30)
         else:
             r = requests.post(url, json=json_data or {}, headers=headers, timeout=60)
         return {"status": r.status_code, "data": r.json()}
@@ -206,6 +209,28 @@ def api(method: str, endpoint: str, json_data: dict = None, token: str = None) -
 
 def is_authenticated() -> bool:
     return st.session_state.token is not None and st.session_state.user is not None
+
+
+# ─── Cloud resume storage helpers ────────────────────────────────────────────
+
+def _fetch_saved_resume(token: str) -> str:
+    """Fetch the user's saved resume from cloud DB. Returns text or ''."""
+    result = api("GET", "/resume", token=token)
+    if result["status"] == 200:
+        return result["data"].get("resume_text", "")
+    return ""
+
+
+def _upload_resume_to_cloud(token: str, text: str, filename: str = "resume.txt") -> bool:
+    """Push resume text to cloud DB silently. Returns True on success."""
+    result = api("POST", "/resume/upload", {"resume_text": text, "filename": filename}, token=token)
+    return result["status"] == 200
+
+
+def _delete_resume_from_cloud(token: str) -> bool:
+    """Delete the saved resume from cloud DB. Returns True on success."""
+    result = api("DELETE", "/resume", token=token)
+    return result["status"] == 200
 
 
 def _extract_file_text(uploaded_file) -> str:
@@ -263,16 +288,19 @@ def resume_input(label: str = "Your Resume", prefill: str = "", key_prefix: str 
         key=f"{key_prefix}_file_upload",
     )
 
-    # When a new file is uploaded, extract and write directly into the text_area's widget key
+    # When a new file is uploaded, extract → store in session + auto-push to DB if authed
     if uploaded:
         file_sig = f"{uploaded.name}_{uploaded.size}"
         if st.session_state.get(f"{key_prefix}_file_sig") != file_sig:
             extracted = _extract_file_text(uploaded)
             if extracted and not extracted.startswith("["):
-                # Write directly into the widget's session state key so text_area picks it up
                 st.session_state[text_key] = extracted
                 st.session_state[f"{key_prefix}_file_sig"] = file_sig
                 st.session_state.stored_resume = extracted
+                # Auto-push to DB for authenticated users — no button needed
+                if is_authenticated():
+                    if _upload_resume_to_cloud(st.session_state.token, extracted, uploaded.name):
+                        st.session_state.resume_on_file = True
                 st.rerun()
 
     # Pre-fill from stored resume or prefill (only if text_area hasn't been touched yet)
@@ -289,29 +317,58 @@ def resume_input(label: str = "Your Resume", prefill: str = "", key_prefix: str 
         key=text_key,
     )
 
-    # Save toggle
+    # Status indicator + save/clear controls
     has_stored = bool(st.session_state.get("stored_resume", ""))
     if resume_text and resume_text.strip():
-        if not has_stored:
-            if st.button("Save as my resume", key=f"{key_prefix}_save", help="Save this resume for use across all pages"):
+        if st.session_state.get("resume_on_file") and resume_text == st.session_state.stored_resume:
+            st.markdown(
+                '<span style="color: #22c55e; font-size: 12px;">&#10003; Resume saved to your account</span>',
+                unsafe_allow_html=True,
+            )
+            col_clear, _ = st.columns([1, 3])
+            with col_clear:
+                if st.button("Remove saved resume", key=f"{key_prefix}_clear", help="Delete from account and clear field"):
+                    st.session_state.stored_resume = ""
+                    st.session_state.resume_on_file = False
+                    st.session_state.pop(text_key, None)
+                    if is_authenticated():
+                        _delete_resume_from_cloud(st.session_state.token)
+                    st.rerun()
+        elif not has_stored:
+            btn_label = "Save resume to account" if is_authenticated() else "Save as my resume"
+            if st.button(btn_label, key=f"{key_prefix}_save", help="Auto-fills your resume on all pages"):
                 st.session_state.stored_resume = resume_text
-                st.success("Resume saved for this session.")
+                if is_authenticated():
+                    if _upload_resume_to_cloud(st.session_state.token, resume_text):
+                        st.session_state.resume_on_file = True
+                        st.success("Resume saved to your account.")
+                    else:
+                        st.warning("Saved for this session only (cloud sync failed).")
+                else:
+                    st.success("Resume saved for this session.")
                 st.rerun()
         elif resume_text != st.session_state.stored_resume:
             col_a, col_b = st.columns(2)
             with col_a:
-                if st.button("Update saved resume", key=f"{key_prefix}_update"):
+                btn_label = "Update saved resume" if not is_authenticated() else "Update & sync to account"
+                if st.button(btn_label, key=f"{key_prefix}_update"):
                     st.session_state.stored_resume = resume_text
-                    st.success("Saved resume updated.")
+                    if is_authenticated():
+                        if _upload_resume_to_cloud(st.session_state.token, resume_text):
+                            st.session_state.resume_on_file = True
                     st.rerun()
             with col_b:
                 if st.button("Clear saved resume", key=f"{key_prefix}_clear"):
                     st.session_state.stored_resume = ""
+                    st.session_state.resume_on_file = False
                     st.session_state.pop(text_key, None)
+                    if is_authenticated():
+                        _delete_resume_from_cloud(st.session_state.token)
                     st.rerun()
         else:
+            badge = "&#10003; Resume saved to your account" if st.session_state.get("resume_on_file") else "&#10003; Using saved resume"
             st.markdown(
-                '<span style="color: #22c55e; font-size: 12px;">&#10003; Using saved resume</span>',
+                f'<span style="color: #22c55e; font-size: 12px;">{badge}</span>',
                 unsafe_allow_html=True,
             )
 
@@ -1328,6 +1385,11 @@ def page_register():
                 st.session_state.token = data["token"]
                 st.session_state.user = data["user"]
                 st.session_state.page = "scorer"
+                # If user had a resume before registering, save it to their account now
+                pre_existing = st.session_state.get("stored_resume", "")
+                if pre_existing:
+                    if _upload_resume_to_cloud(data["token"], pre_existing):
+                        st.session_state.resume_on_file = True
                 st.success("Account created! Redirecting to scorer...")
                 st.rerun()
             elif result["status"] == 409:
@@ -1370,6 +1432,11 @@ def page_login():
                 st.session_state.token = data["token"]
                 st.session_state.user = data["user"]
                 st.session_state.page = "dashboard"
+                # Auto-load saved resume from cloud into session
+                saved = _fetch_saved_resume(data["token"])
+                if saved:
+                    st.session_state.stored_resume = saved
+                    st.session_state.resume_on_file = True
                 st.success("Signed in!")
                 st.rerun()
             else:
