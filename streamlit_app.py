@@ -1727,32 +1727,42 @@ def render_job_card(rank: int, job: dict, resume_text: str = ""):
         for kw in missing_kw[:5]
     )
 
-    st.markdown(
-        f"""<div class="card" style="margin-bottom: 12px;">
-        <div style="display: flex; justify-content: space-between; align-items: start;">
-            <div>
-                <span style="color: #818cf8; font-weight: 700; font-size: 14px;">#{rank}</span>
-                <span style="color: #e2e8f0; font-weight: 600; font-size: 16px; margin-left: 8px;">{_html.escape(job.get('title', 'Unknown'))}</span>
-                {rec_badge}
-            </div>
-            <div style="text-align: right;">
-                <span style="color: {ats_color}; font-weight: 700; font-size: 18px;">ATS {ats}%</span>
-                <span style="color: #475569; margin: 0 6px;">|</span>
-                <span style="color: {hr_color}; font-weight: 700; font-size: 18px;">HR {hr}%</span>
-            </div>
-        </div>
-        <div style="margin-top: 6px; color: #94a3b8; font-size: 14px;">
-            <strong>{_html.escape(job.get('company', ''))}</strong> &nbsp;&bull;&nbsp; {_html.escape(job.get('location', ''))}
-            {f' &nbsp;&bull;&nbsp; <span style="color: #818cf8;">{salary_text}</span>' if salary_text else ''}
-            {f' &nbsp;&bull;&nbsp; Posted: {job.get("posted_date", "")}' if job.get("posted_date") else ''}
-        </div>
-        <div style="margin-top: 8px;">
-            {f'<div style="margin-bottom: 4px;"><span style="color: #64748b; font-size: 11px;">MATCHED:</span> {matched_chips}</div>' if matched_chips else ''}
-            {f'<div><span style="color: #64748b; font-size: 11px;">MISSING:</span> {missing_chips}</div>' if missing_chips else ''}
-        </div>
-        </div>""",
-        unsafe_allow_html=True,
+    title_esc = _html.escape(job.get("title", "Unknown"))
+    company_esc = _html.escape(job.get("company", ""))
+    location_esc = _html.escape(job.get("location", ""))
+    posted = job.get("posted_date", "")
+
+    salary_html = f' &nbsp;&bull;&nbsp; <span style="color: #818cf8;">{salary_text}</span>' if salary_text else ""
+    posted_html = f" &nbsp;&bull;&nbsp; Posted: {posted}" if posted else ""
+
+    card_html = (
+        '<div class="card" style="margin-bottom: 12px;">'
+        '<div style="display: flex; justify-content: space-between; align-items: start;">'
+        '<div>'
+        f'<span style="color: #818cf8; font-weight: 700; font-size: 14px;">#{rank}</span>'
+        f'<span style="color: #e2e8f0; font-weight: 600; font-size: 16px; margin-left: 8px;">{title_esc}</span>'
+        f'{rec_badge}'
+        '</div>'
+        '<div style="text-align: right;">'
+        f'<span style="color: {ats_color}; font-weight: 700; font-size: 18px;">ATS {ats}%</span>'
+        '<span style="color: #475569; margin: 0 6px;">|</span>'
+        f'<span style="color: {hr_color}; font-weight: 700; font-size: 18px;">HR {hr}%</span>'
+        '</div>'
+        '</div>'
+        '<div style="margin-top: 6px; color: #94a3b8; font-size: 14px;">'
+        f'<strong>{company_esc}</strong> &nbsp;&bull;&nbsp; {location_esc}'
+        f'{salary_html}{posted_html}'
+        '</div>'
     )
+    if matched_chips or missing_chips:
+        card_html += '<div style="margin-top: 8px;">'
+        if matched_chips:
+            card_html += f'<div style="margin-bottom: 4px;"><span style="color: #64748b; font-size: 11px;">MATCHED:</span> {matched_chips}</div>'
+        if missing_chips:
+            card_html += f'<div><span style="color: #64748b; font-size: 11px;">MISSING:</span> {missing_chips}</div>'
+        card_html += '</div>'
+    card_html += '</div>'
+    st.markdown(card_html, unsafe_allow_html=True)
 
     # Action buttons row
     btn_cols = st.columns([1, 1, 1, 1, 2])
