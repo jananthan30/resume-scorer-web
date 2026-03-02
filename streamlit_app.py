@@ -53,10 +53,11 @@ st.markdown("""
     .stApp { background-color: #0f172a; }
     [data-testid="stHeader"] { background-color: #0f172a; }
 
-    /* Hide Streamlit branding */
+    /* Hide Streamlit branding and header */
     #MainMenu { visibility: hidden; }
     footer { visibility: hidden; }
     [data-testid="stToolbar"] { display: none; }
+    [data-testid="stHeader"] { display: none; }
 
     /* Card styles */
     .card {
@@ -172,7 +173,7 @@ st.markdown("""
     .stProgress > div > div > div { background-color: #6366f1; }
 
     /* Remove extra padding on wide layout */
-    .block-container { padding-top: 2rem; }
+    .block-container { padding-top: 1rem; }
 </style>
 """, unsafe_allow_html=True)
 
