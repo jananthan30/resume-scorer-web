@@ -276,6 +276,39 @@ def _delete_resume_from_cloud(token: str) -> bool:
     return result["status"] == 200
 
 
+def api_stream(endpoint: str, json_data: dict, token: str, timeout: int = 180):
+    """
+    POST to an SSE endpoint and yield parsed event dicts as they arrive.
+    Handles non-streaming fallback (plain JSON response) transparently.
+    Yields dicts; callers check event["stage"] for "done" / "error" / progress.
+    """
+    url = f"{API_URL.rstrip('/')}{endpoint}"
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        "X-Client-Fingerprint": st.session_state.session_id,
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        with requests.post(url, json=json_data, headers=headers, stream=True, timeout=timeout) as r:
+            if r.status_code != 200:
+                try:
+                    detail = r.json().get("detail", f"HTTP {r.status_code}")
+                except Exception:
+                    detail = r.text[:300] or f"HTTP {r.status_code}"
+                yield {"stage": "error", "detail": detail}
+                return
+            for raw_line in r.iter_lines():
+                if raw_line and raw_line.startswith(b"data: "):
+                    try:
+                        yield json.loads(raw_line[6:])
+                    except json.JSONDecodeError:
+                        pass
+    except Exception as exc:
+        yield {"stage": "error", "detail": str(exc)}
+
+
 def _fetch_full_jd(job_url: str, job_title: str, token: str) -> tuple:
     """Scrape full JD from listing URL. Returns (jd_text, error_message)."""
     result = api(
@@ -1379,58 +1412,53 @@ def page_rewriter():
             st.warning("Resume seems too short. Please paste the full text.")
             return
 
-        # Run API call in background thread so we can show staged progress
-        _result_holder: dict = {"result": None}
-
-        def _do_rewrite():
-            _result_holder["result"] = api("POST", "/rewrite", {
-                "resume_text": resume_text,
-                "jd_text": jd_text,
-            }, token=st.session_state.token)
-
-        _thread = threading.Thread(target=_do_rewrite, daemon=True)
-        _thread.start()
-
-        _stages = [
-            (8,  "Analyzing job description and requirements…"),
-            (18, "Extracting must-have skills and keywords…"),
-            (30, "Matching your experience to the role…"),
-            (44, "Rewriting your professional summary…"),
-            (58, "Tailoring experience bullets with JD language…"),
-            (70, "Optimizing ATS keyword placement…"),
-            (82, "Running ATS + HR scoring on tailored draft…"),
-            (91, "Quality-checking the final resume…"),
-        ]
+        # ── Stream SSE progress from /rewrite endpoint ────────────────────────
+        _stage_labels = {
+            "scoring_original":  "Scoring your original resume…",
+            "rewriting":         "Claude AI is rewriting your resume…",
+            "scoring_rewritten": "Scoring the tailored resume…",
+        }
         _status_box = st.empty()
         _pbar = st.progress(0)
-        _stage_idx = 0
+        _rewrite_result = None
+        _rewrite_error = None
 
-        while _thread.is_alive():
-            _pct, _msg = _stages[min(_stage_idx, len(_stages) - 1)]
-            _status_box.markdown(
-                f'<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;'
-                f'padding:14px 18px;color:#94a3b8;font-size:14px;">'
-                f'<span style="color:#818cf8;font-weight:600;">Claude AI</span> &nbsp;·&nbsp; {_msg}'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-            _pbar.progress(_pct)
-            time.sleep(10)
-            _stage_idx += 1
+        for _event in api_stream(
+            "/rewrite",
+            {"resume_text": resume_text, "jd_text": jd_text},
+            token=st.session_state.token,
+        ):
+            _stage = _event.get("stage", "")
+            _pct   = _event.get("pct", 0)
+
+            if _stage == "error":
+                _rewrite_error = _event.get("detail", "Unknown error")
+                break
+            elif _stage == "done":
+                _rewrite_result = _event.get("result")
+                break
+            else:
+                _label = _stage_labels.get(_stage, "Processing…")
+                _status_box.markdown(
+                    f'<div style="background:#1e293b;border:1px solid #334155;'
+                    f'border-radius:8px;padding:14px 18px;color:#94a3b8;font-size:14px;">'
+                    f'<span style="color:#818cf8;font-weight:600;">Claude AI</span>'
+                    f'&nbsp;·&nbsp;{_label}</div>',
+                    unsafe_allow_html=True,
+                )
+                _pbar.progress(max(1, _pct) / 100)
 
         _status_box.empty()
         _pbar.empty()
-        result = _result_holder["result"]
 
-        if result is None:
-            st.error("Rewrite timed out or failed to reach the server. Please try again.")
+        if _rewrite_error:
+            st.error(f"Rewrite failed: {_rewrite_error}")
+            return
+        if not _rewrite_result:
+            st.error("Rewrite returned no data. Please try again.")
             return
 
-        if result["status"] != 200:
-            st.error(f"Rewrite failed: {result['data'].get('detail', 'Unknown error')}")
-            return
-
-        st.session_state.rewrite_result = result["data"]
+        st.session_state.rewrite_result = _rewrite_result
         st.rerun()
 
     # Display rewrite results
