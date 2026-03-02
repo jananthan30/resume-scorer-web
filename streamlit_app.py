@@ -1267,6 +1267,11 @@ def page_rewriter():
     can_rewrite = user_tier in ("pro", "ultra")
 
     if not can_rewrite:
+        # Consume prefill session state so it doesn't carry over on next navigation
+        st.session_state.pop("prefill_resume", None)
+        st.session_state.pop("prefill_jd", None)
+        st.session_state.pop("prefill_job_url", None)
+        st.session_state.pop("prefill_job_title", None)
         # Show upgrade prompt for free/anonymous users
         st.markdown("""
         <div class="card-accent" style="text-align: center; border-color: #818cf8;">
@@ -1989,7 +1994,8 @@ def render_job_card(rank: int, job: dict, resume_text: str = ""):
         if job.get("url"):
             st.link_button("View Listing", job["url"], use_container_width=True)
 
-    job_url = job.get("url", "")
+    # listing_url = Adzuna /details/{id} page (scrapeable); url = employer redirect
+    job_url = job.get("listing_url", "") or job.get("url", "")
     job_title_nav = job.get("title", "")
 
     with btn_cols[1]:
