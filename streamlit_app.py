@@ -1435,6 +1435,47 @@ def page_rewriter():
             key="rewrite_jd_text",
         )
 
+    # ── Resume format selector ─────────────────────────────────────────────
+    st.markdown("#### Choose Resume Format")
+    _FORMAT_OPTIONS = {
+        "ats":       ("ATS Standard",      "Clean, keyword-optimised. Passes applicant tracking systems. Best for most corporate roles."),
+        "harvard":   ("Harvard Classic",   "Traditional academic/professional. Times New Roman, underlined section headers. Best for law, academia, consulting."),
+        "modern":    ("Modern Clean",      "Contemporary design with blue accent lines. Concise, impact-focused bullets. Best for tech, startups, marketing."),
+        "executive": ("Executive Classic", "Formal, centered layout with Georgia serif font. Emphasis on leadership scale. Best for C-suite and senior finance."),
+    }
+    _fmt_cols = st.columns(4)
+    _selected_fmt = st.session_state.get("rewrite_format", "ats")
+    for _ci, (_fkey, (_fname, _fdesc)) in enumerate(zip(_FORMAT_OPTIONS, _FORMAT_OPTIONS.values())):
+        with _fmt_cols[_ci]:
+            _is_sel = (_fkey == _selected_fmt)
+            _border = "#818cf8" if _is_sel else "#334155"
+            _bg     = "#1e1b4b" if _is_sel else "#1e293b"
+            st.markdown(
+                f'<div style="border:2px solid {_border};border-radius:8px;padding:10px 12px;'
+                f'background:{_bg};cursor:pointer;min-height:90px;">'
+                f'<div style="color:#e2e8f0;font-weight:700;font-size:13px;margin-bottom:4px;">{_fname}</div>'
+                f'<div style="color:#94a3b8;font-size:11px;line-height:1.4;">{_fdesc}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                "Select" if not _is_sel else "✓ Selected",
+                key=f"fmt_{_fkey}",
+                use_container_width=True,
+                type="primary" if _is_sel else "secondary",
+            ):
+                st.session_state.rewrite_format = _fkey
+                st.rerun()
+
+    _selected_fmt = st.session_state.get("rewrite_format", "ats")
+    _fmt_name = _FORMAT_OPTIONS[_selected_fmt][0]
+    st.markdown(
+        f'<div style="color:#818cf8;font-size:13px;margin-top:4px;margin-bottom:8px;">'
+        f'Format: <strong>{_fmt_name}</strong> — Claude will structure your resume in this style '
+        f'and the DOCX will use its fonts and layout.</div>',
+        unsafe_allow_html=True,
+    )
+
     _, btn_col, _ = st.columns([3, 2, 3])
     with btn_col:
         rewrite_clicked = st.button("Rewrite My Resume", use_container_width=True, type="primary")
@@ -1450,7 +1491,7 @@ def page_rewriter():
         # ── Stream SSE progress from /rewrite endpoint ────────────────────────
         _stage_labels = {
             "scoring_original":  "Scoring your original resume…",
-            "rewriting":         "Claude AI is rewriting your resume…",
+            "rewriting":         f"Claude AI is rewriting in {_fmt_name} format…",
             "scoring_rewritten": "Scoring the tailored resume…",
         }
         _status_box = st.empty()
@@ -1460,7 +1501,7 @@ def page_rewriter():
 
         for _event in api_stream(
             "/rewrite",
-            {"resume_text": resume_text, "jd_text": jd_text},
+            {"resume_text": resume_text, "jd_text": jd_text, "format_style": _selected_fmt},
             token=st.session_state.token,
         ):
             _stage = _event.get("stage", "")
@@ -1502,63 +1543,134 @@ def page_rewriter():
         render_rewrite_results(data)
 
 
-def _make_resume_docx(resume_text: str) -> bytes:
+def _make_resume_docx(resume_text: str, format_style: str = "ats") -> bytes:
     """
-    Convert a plain-text ATS resume (pipe-separated job lines, ALL-CAPS headers,
-    bullet •  lines, ___ separators) into a formatted DOCX.  Returns raw bytes.
+    Convert plain-text resume to a formatted DOCX.
+    format_style: "ats" | "harvard" | "modern" | "executive"
     """
     import io
     import re
     from docx import Document
-    from docx.shared import Pt, Inches
+    from docx.shared import Pt, Inches, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
 
+    fs = format_style or "ats"
+
+    # ── Format theme definitions ──────────────────────────────────────────────
+    THEMES = {
+        "ats": dict(
+            font="Calibri", body_size=10, name_size=16, header_size=11,
+            margin=0.75, header_bold=True, header_caps=True,
+            name_center=False, header_underline=False,
+            header_color=None, accent_color=None,
+            bullet_char="\u2022", bullet_indent=0.25,
+            header_sb=8, header_sa=3,
+        ),
+        "harvard": dict(
+            font="Times New Roman", body_size=11, name_size=14, header_size=11,
+            margin=1.0, header_bold=True, header_caps=True,
+            name_center=True, header_underline=True,
+            header_color=None, accent_color=None,
+            bullet_char="\u2013", bullet_indent=0.25,
+            header_sb=10, header_sa=2,
+        ),
+        "modern": dict(
+            font="Calibri", body_size=10, name_size=18, header_size=10,
+            margin=0.75, header_bold=True, header_caps=True,
+            name_center=False, header_underline=False,
+            header_color=(30, 58, 138), accent_color=(30, 58, 138),
+            bullet_char="\u25cf", bullet_indent=0.2,
+            header_sb=10, header_sa=2,
+        ),
+        "executive": dict(
+            font="Georgia", body_size=10.5, name_size=16, header_size=11,
+            margin=1.0, header_bold=True, header_caps=True,
+            name_center=True, header_underline=False,
+            header_color=None, accent_color=None,
+            bullet_char="\u2022", bullet_indent=0.3,
+            header_sb=10, header_sa=3,
+        ),
+    }
+    t = THEMES.get(fs, THEMES["ats"])
+
     doc = Document()
     for sec in doc.sections:
-        sec.top_margin = sec.bottom_margin = Inches(0.75)
-        sec.left_margin = sec.right_margin = Inches(0.75)
+        m = Inches(t["margin"])
+        sec.top_margin = sec.bottom_margin = m
+        sec.left_margin = sec.right_margin = m
 
-    # Default Normal style
     normal = doc.styles["Normal"]
-    normal.font.name = "Calibri"
-    normal.font.size = Pt(10)
+    normal.font.name = t["font"]
+    normal.font.size = Pt(t["body_size"])
 
     def _strip_md(text):
         return re.sub(r"\*\*(.*?)\*\*", r"\1", text)
 
-    def _para(text, bold=False, size=10, sb=0, sa=2):
-        p = doc.add_paragraph()
+    def _add_run(p, text, bold=False, size=None, color=None, underline=False, italic=False):
         run = p.add_run(_strip_md(text))
         run.bold = bold
-        run.font.name = "Calibri"
-        run.font.size = Pt(size)
+        run.italic = italic
+        run.underline = underline
+        run.font.name = t["font"]
+        run.font.size = Pt(size or t["body_size"])
+        if color:
+            run.font.color.rgb = RGBColor(*color)
+        return run
+
+    def _para(text, bold=False, size=None, sb=0, sa=2,
+              center=False, color=None, underline=False):
+        p = doc.add_paragraph()
+        if center:
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _add_run(p, text, bold=bold, size=size, color=color, underline=underline)
         p.paragraph_format.space_before = Pt(sb)
         p.paragraph_format.space_after = Pt(sa)
         return p
 
-    def _bullet(text):
-        text = _strip_md(text.lstrip("•-").strip())
+    def _section_header(text):
+        """Render a section header using the current theme."""
         p = doc.add_paragraph()
-        run = p.add_run(f"\u2022  {text}")
-        run.font.name = "Calibri"
-        run.font.size = Pt(10)
-        pf = p.paragraph_format
-        pf.left_indent = Inches(0.25)
-        pf.space_before = Pt(0)
-        pf.space_after = Pt(1)
+        if t["name_center"]:           # harvard / executive center headers too
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = _add_run(
+            p, text,
+            bold=t["header_bold"],
+            size=t["header_size"],
+            color=t["header_color"],
+            underline=t["header_underline"],
+        )
+        p.paragraph_format.space_before = Pt(t["header_sb"])
+        p.paragraph_format.space_after  = Pt(t["header_sa"])
 
-    def _hrule():
+        # Modern: add a thin colored rule below the header
+        if fs == "modern":
+            _hrule(color="1e3a8a", sz=4)
+        return p
+
+    def _bullet(text):
+        text = _strip_md(text.lstrip("\u2022\u25cf\u2013-").strip())
         p = doc.add_paragraph()
-        p.paragraph_format.space_before = Pt(4)
-        p.paragraph_format.space_after = Pt(4)
+        run = p.add_run(f"{t['bullet_char']}  {text}")
+        run.font.name = t["font"]
+        run.font.size = Pt(t["body_size"])
+        pf = p.paragraph_format
+        pf.left_indent = Inches(t["bullet_indent"])
+        pf.space_before = Pt(0)
+        pf.space_after  = Pt(1.5 if fs == "executive" else 1)
+
+    def _hrule(color="94a3b8", sz=6):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(3)
+        p.paragraph_format.space_after  = Pt(3)
         pPr = p._p.get_or_add_pPr()
         pBdr = OxmlElement("w:pBdr")
         bottom = OxmlElement("w:bottom")
         bottom.set(qn("w:val"), "single")
-        bottom.set(qn("w:sz"), "6")
+        bottom.set(qn("w:sz"), str(sz))
         bottom.set(qn("w:space"), "1")
-        bottom.set(qn("w:color"), "94a3b8")
+        bottom.set(qn("w:color"), color)
         pBdr.append(bottom)
         pPr.append(pBdr)
 
@@ -1569,58 +1681,70 @@ def _make_resume_docx(resume_text: str) -> bytes:
     )
 
     lines = resume_text.strip().splitlines()
-    name_done = False
-    contact_done = False
+    name_done = contact_done = False
 
     for line in lines:
         s = line.strip()
 
         # Separator line (___ or ---)
-        if s and len(s) > 5 and len(set(s) - {" "}) == 1 and s[0] in "_-=":
-            _hrule()
+        if s and len(s) > 5 and len(set(s) - {" "}) == 1 and s[0] in "_-=─":
+            if fs != "modern":   # modern inserts its own rule after headers
+                _hrule()
             continue
 
         if not s:
             continue
 
-        # First non-empty line → Name (large bold)
+        # First non-empty line → Name
         if not name_done:
-            _para(s, bold=True, size=16, sb=0, sa=2)
+            p = _para(
+                s, bold=True, size=t["name_size"], sb=0, sa=2,
+                center=t["name_center"],
+                color=t["accent_color"] if fs == "modern" else None,
+            )
+            # Modern: accent line under name
+            if fs == "modern":
+                _hrule(color="1e3a8a", sz=8)
             name_done = True
             continue
 
         # Second non-empty line → Contact info
         if not contact_done:
-            _para(s, bold=False, size=10, sb=0, sa=6)
+            _para(s, bold=False, size=t["body_size"] - 0.5,
+                  sb=0, sa=6, center=t["name_center"])
             contact_done = True
             continue
 
         # Section header: ALL CAPS, no pipe/bullet
         if (
             s.isupper() and 3 <= len(s) <= 70
-            and "\u2022" not in s and "|" not in s
-            and not s[0].isdigit()
+            and "\u2022" not in s and "\u25cf" not in s
+            and "|" not in s and not s[0].isdigit()
         ):
-            _para(s, bold=True, size=11, sb=8, sa=3)
+            _section_header(s)
             continue
 
         # Bullet point
-        if s.startswith("\u2022") or (s.startswith("-") and len(s) > 3 and s[1] == " "):
+        if s.startswith(("\u2022", "\u25cf", "\u2013")) or (
+            s.startswith("-") and len(s) > 3 and s[1] == " "
+        ):
             _bullet(s)
             continue
 
         # Job/company line with pipe separator
         if "|" in s and not s.isupper():
-            _para(s, bold=True, size=10, sb=6, sa=1)
+            _para(s, bold=True, size=t["body_size"], sb=6, sa=1,
+                  color=t["accent_color"] if fs == "modern" else None)
             continue
 
         # Date line
         if DATE_RE.search(s):
-            _para(s, bold=False, size=10, sb=0, sa=1)
+            _para(s, bold=False, size=t["body_size"] - 0.5, sb=0, sa=1,
+                  italic=(fs == "harvard"))
             continue
 
         # Regular text
-        _para(s, bold=False, size=10, sb=1, sa=2)
+        _para(s, bold=False, size=t["body_size"], sb=1, sa=2)
 
     buf = io.BytesIO()
     doc.save(buf)
@@ -1676,20 +1800,26 @@ def render_rewrite_results(data: dict):
         st.markdown("##### Tailored Resume")
         st.text_area("Preview your tailored resume", value=rewritten_text, height=400, key="rewritten_output")
 
+        fmt_style = data.get("format_style", "ats")
+        fmt_labels = {
+            "ats": "ATS Standard", "harvard": "Harvard Classic",
+            "modern": "Modern Clean", "executive": "Executive Classic",
+        }
+        fmt_label = fmt_labels.get(fmt_style, "ATS Standard")
+
         dl_col, _ = st.columns([2, 3])
         with dl_col:
             try:
-                docx_bytes = _make_resume_docx(rewritten_text)
+                docx_bytes = _make_resume_docx(rewritten_text, format_style=fmt_style)
                 st.download_button(
-                    label="Download Tailored Resume (.docx)",
+                    label=f"Download — {fmt_label} (.docx)",
                     data=docx_bytes,
-                    file_name="tailored_resume.docx",
+                    file_name=f"tailored_resume_{fmt_style}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True,
                     type="primary",
                 )
             except Exception:
-                # Fallback to plain text if DOCX generation fails
                 st.download_button(
                     label="Download Tailored Resume (.txt)",
                     data=rewritten_text,
