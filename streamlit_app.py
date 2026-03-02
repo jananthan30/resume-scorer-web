@@ -1392,6 +1392,19 @@ def page_dashboard():
 
 # ─── Main router ─────────────────────────────────────────────────────────────
 
+def render_footer():
+    st.markdown("---")
+    st.markdown(
+        '<div style="text-align: center; padding: 16px 0; color: #64748b; font-size: 13px;">'
+        'AI Resume Tuner &nbsp;|&nbsp; '
+        '<a href="https://stats.uptimerobot.com/GrOgAbj0Nz" target="_blank" style="color: #818cf8; text-decoration: none;">System Status</a> &nbsp;|&nbsp; '
+        '<a href="https://github.com/jananthan30/Resume-Builder" target="_blank" style="color: #818cf8; text-decoration: none;">GitHub</a> &nbsp;|&nbsp; '
+        'MIT License'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def main():
     render_nav()
 
@@ -1411,6 +1424,8 @@ def main():
         page_dashboard()
     else:
         page_home()
+
+    render_footer()
 
 
 if __name__ == "__main__":
