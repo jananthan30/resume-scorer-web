@@ -281,30 +281,36 @@ def _fetch_full_jd(job_url: str, job_title: str, token: str) -> tuple:
     return "", result["data"].get("detail", "Could not fetch the job description.")
 
 
+def _jd_is_truncated(text: str) -> bool:
+    """Return True when the description looks like an API snippet rather than a full JD."""
+    t = text.strip()
+    # Explicit truncation markers used by Adzuna / Remotive APIs
+    if t.endswith("…") or t.endswith("...") or t.endswith("…"):
+        return True
+    # Short text is almost always a snippet
+    if len(t) < 1200:
+        return True
+    return False
+
+
 def _apply_jd_prefill(jd_key: str, prefill_jd: str, job_url: str, job_title: str):
     """
     Called once per navigation from a job card.
-    Uses the API-provided description if it's substantial (Adzuna/Remotive block scrapers).
-    Only attempts URL scraping when the description is too short (<400 chars).
-    Writes result into st.session_state[jd_key].
+    If the description looks truncated, scrapes the listing URL for the full text.
+    Falls back to the API snippet silently on failure.
     Returns (final_jd_text, warning_message).
     """
-    # If we already have a good description from the API, use it directly.
-    # Adzuna and Remotive block scrapers on their detail pages so scraping adds no value.
-    if len(prefill_jd.strip()) >= 400:
-        st.session_state[jd_key] = prefill_jd
-        return prefill_jd, ""
-
-    # Description is too short — try scraping the original listing URL.
-    if job_url and is_authenticated():
+    if _jd_is_truncated(prefill_jd) and job_url and is_authenticated():
         with st.spinner("Fetching full job description from listing…"):
             full_jd, err = _fetch_full_jd(job_url, job_title, st.session_state.token)
         if full_jd and len(full_jd) > len(prefill_jd):
             st.session_state[jd_key] = full_jd
             return full_jd, ""
-        warn = err or "Could not fetch the full listing — showing the API snippet. You can paste the full JD below."
+        # Scraping failed — use what we have; only warn if we have nothing at all
         st.session_state[jd_key] = prefill_jd
-        return prefill_jd, warn
+        if not prefill_jd.strip():
+            return prefill_jd, err or "Could not fetch the JD. Please paste it manually."
+        return prefill_jd, ""
 
     st.session_state[jd_key] = prefill_jd
     return prefill_jd, ""
