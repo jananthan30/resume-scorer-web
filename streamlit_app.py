@@ -100,13 +100,13 @@ def show_landing():
 
     st.markdown("---")
 
-    st.markdown("**Want more than 5 scores?** Create a free account below, or upgrade to Pro ($12/month) for unlimited.")
+    st.markdown("**Need unlimited scoring?** Upgrade to Pro ($12/month) for unlimited ATS + HR + LLM scores. Create an account below to get started.")
 
 
 def show_register():
     """Registration form."""
     st.subheader("Create Account")
-    st.caption("Register to track usage and upgrade to Pro when ready.")
+    st.caption("Register to upgrade to Pro for unlimited scoring. Free accounts still have 5 scores.")
 
     with st.form("register_form"):
         email = st.text_input("Email", placeholder="you@example.com")
