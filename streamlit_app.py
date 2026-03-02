@@ -1028,16 +1028,28 @@ def page_rewriter():
         """, unsafe_allow_html=True)
 
         st.markdown("")
-        _, cta_col, _ = st.columns([2, 3, 2])
-        with cta_col:
-            if not is_authenticated():
+        if not is_authenticated():
+            _, cta_col, _ = st.columns([2, 3, 2])
+            with cta_col:
                 if st.button("Sign Up to Get Started", type="primary", use_container_width=True):
                     st.session_state.page = "register"
                     st.rerun()
-            else:
-                if st.button("Upgrade to Pro ($12/month)", type="primary", use_container_width=True):
+        else:
+            _, pro_col, ultra_col, _ = st.columns([1, 2, 2, 1])
+            with pro_col:
+                if st.button("Pro — $12/month", type="primary", use_container_width=True):
                     with st.spinner("Creating checkout session..."):
                         result = api("POST", "/billing/checkout", {"tier": "pro"}, token=st.session_state.token)
+                    if result["status"] == 200 and "checkout_url" in result["data"]:
+                        st.link_button("Complete Payment on Stripe", result["data"]["checkout_url"], use_container_width=True)
+                    elif result["status"] == 503:
+                        st.warning("Stripe billing is not configured yet.")
+                    else:
+                        st.error(result["data"].get("detail", "Could not create checkout session."))
+            with ultra_col:
+                if st.button("Ultra — $29/month", use_container_width=True):
+                    with st.spinner("Creating checkout session..."):
+                        result = api("POST", "/billing/checkout", {"tier": "ultra"}, token=st.session_state.token)
                     if result["status"] == 200 and "checkout_url" in result["data"]:
                         st.link_button("Complete Payment on Stripe", result["data"]["checkout_url"], use_container_width=True)
                     elif result["status"] == 503:
@@ -1441,16 +1453,28 @@ def page_cover_letter():
         """, unsafe_allow_html=True)
 
         st.markdown("")
-        _, cta_col, _ = st.columns([2, 3, 2])
-        with cta_col:
-            if not is_authenticated():
+        if not is_authenticated():
+            _, cta_col, _ = st.columns([2, 3, 2])
+            with cta_col:
                 if st.button("Sign Up to Get Started", type="primary", use_container_width=True, key="cl_signup"):
                     st.session_state.page = "register"
                     st.rerun()
-            else:
-                if st.button("Upgrade to Pro ($12/month)", type="primary", use_container_width=True, key="cl_upgrade"):
+        else:
+            _, pro_col, ultra_col, _ = st.columns([1, 2, 2, 1])
+            with pro_col:
+                if st.button("Pro — $12/month", type="primary", use_container_width=True, key="cl_pro"):
                     with st.spinner("Creating checkout session..."):
                         result = api("POST", "/billing/checkout", {"tier": "pro"}, token=st.session_state.token)
+                    if result["status"] == 200 and "checkout_url" in result["data"]:
+                        st.link_button("Complete Payment on Stripe", result["data"]["checkout_url"], use_container_width=True)
+                    elif result["status"] == 503:
+                        st.warning("Stripe billing is not configured yet.")
+                    else:
+                        st.error(result["data"].get("detail", "Could not create checkout session."))
+            with ultra_col:
+                if st.button("Ultra — $29/month", use_container_width=True, key="cl_ultra"):
+                    with st.spinner("Creating checkout session..."):
+                        result = api("POST", "/billing/checkout", {"tier": "ultra"}, token=st.session_state.token)
                     if result["status"] == 200 and "checkout_url" in result["data"]:
                         st.link_button("Complete Payment on Stripe", result["data"]["checkout_url"], use_container_width=True)
                     elif result["status"] == 503:
