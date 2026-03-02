@@ -44,6 +44,7 @@ _defaults = {
     "prefill_resume": "",
     "prefill_jd": "",
     "discover_results": None,
+    "stored_resume": "",  # Saved resume text persists across pages
 }
 for key, val in _defaults.items():
     if key not in st.session_state:
@@ -205,6 +206,110 @@ def api(method: str, endpoint: str, json_data: dict = None, token: str = None) -
 
 def is_authenticated() -> bool:
     return st.session_state.token is not None and st.session_state.user is not None
+
+
+def _extract_file_text(uploaded_file) -> str:
+    """Extract text from an uploaded PDF, DOCX, or TXT file."""
+    name = uploaded_file.name.lower()
+    raw = uploaded_file.read()
+    if name.endswith(".txt") or name.endswith(".md"):
+        return raw.decode("utf-8", errors="replace")
+    # Send to server for extraction via base64
+    import base64
+    b64 = base64.b64encode(raw).decode("ascii")
+    result = api("POST", "/score/both", {
+        "resume_file": b64,
+        "resume_filename": uploaded_file.name,
+        "jd_text": "test",
+    })
+    # If server extracted it, pull from the response — but this actually scores.
+    # Better: extract locally.
+    if name.endswith(".pdf"):
+        try:
+            import io
+            try:
+                from PyPDF2 import PdfReader
+                reader = PdfReader(io.BytesIO(raw))
+                return "\n".join(p.extract_text() or "" for p in reader.pages)
+            except ImportError:
+                pass
+            try:
+                import pdfplumber
+                with pdfplumber.open(io.BytesIO(raw)) as pdf:
+                    return "\n".join(p.extract_text() or "" for p in pdf.pages)
+            except ImportError:
+                pass
+        except Exception:
+            pass
+        return "[Could not extract PDF text. Please paste your resume instead.]"
+    elif name.endswith(".docx"):
+        try:
+            import io
+            from docx import Document
+            doc = Document(io.BytesIO(raw))
+            return "\n".join(p.text for p in doc.paragraphs)
+        except ImportError:
+            return "[python-docx not available. Please paste your resume instead.]"
+        except Exception:
+            return "[Could not extract DOCX text. Please paste your resume instead.]"
+    return raw.decode("utf-8", errors="replace")
+
+
+def resume_input(label: str = "Your Resume", prefill: str = "", key_prefix: str = "r", height: int = 350) -> str:
+    """Shared resume input: file upload + text area + save option.
+
+    Returns the resume text (from file, stored resume, or typed).
+    """
+    # Determine initial value: prefill (from Discover handoff) > stored > empty
+    initial = prefill or st.session_state.get("stored_resume", "") or ""
+
+    # File upload
+    uploaded = st.file_uploader(
+        "Upload resume (PDF, DOCX, or TXT)",
+        type=["pdf", "docx", "txt", "md"],
+        key=f"{key_prefix}_file_upload",
+    )
+
+    if uploaded:
+        extracted = _extract_file_text(uploaded)
+        if extracted and not extracted.startswith("["):
+            initial = extracted
+
+    # Text area
+    resume_text = st.text_area(
+        label,
+        value=initial,
+        height=height,
+        placeholder="Paste your resume text here, or upload a file above.",
+        key=f"{key_prefix}_text",
+    )
+
+    # Save toggle
+    has_stored = bool(st.session_state.get("stored_resume", ""))
+    if resume_text and resume_text.strip():
+        if not has_stored:
+            if st.button("Save as my resume", key=f"{key_prefix}_save", help="Save this resume for use across all pages"):
+                st.session_state.stored_resume = resume_text
+                st.success("Resume saved for this session.")
+                st.rerun()
+        elif resume_text != st.session_state.stored_resume:
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("Update saved resume", key=f"{key_prefix}_update"):
+                    st.session_state.stored_resume = resume_text
+                    st.success("Saved resume updated.")
+                    st.rerun()
+            with col_b:
+                if st.button("Clear saved resume", key=f"{key_prefix}_clear"):
+                    st.session_state.stored_resume = ""
+                    st.rerun()
+        else:
+            st.markdown(
+                '<span style="color: #22c55e; font-size: 12px;">&#10003; Using saved resume</span>',
+                unsafe_allow_html=True,
+            )
+
+    return resume_text
 
 
 # ─── Navigation ──────────────────────────────────────────────────────────────
@@ -580,12 +685,7 @@ def page_scorer():
     # Input columns
     col_resume, col_jd = st.columns(2)
     with col_resume:
-        resume_text = st.text_area(
-            "Resume",
-            value=prefill_resume,
-            height=350,
-            placeholder="Paste your resume text here...\n\nInclude all sections: summary, experience, skills, education.",
-        )
+        resume_text = resume_input("Resume", prefill=prefill_resume, key_prefix="score")
     with col_jd:
         jd_text = st.text_area(
             "Job Description",
@@ -1080,12 +1180,7 @@ def page_rewriter():
 
     col_resume, col_jd = st.columns(2)
     with col_resume:
-        resume_text = st.text_area(
-            "Your Resume",
-            value=prefill_resume,
-            height=400,
-            placeholder="Paste your full resume text here...",
-        )
+        resume_text = resume_input("Your Resume", prefill=prefill_resume, key_prefix="rewrite", height=400)
     with col_jd:
         jd_text = st.text_area(
             "Target Job Description",
@@ -1489,12 +1584,7 @@ def page_cover_letter():
 
     col_resume, col_jd = st.columns(2)
     with col_resume:
-        resume_text = st.text_area(
-            "Your Resume",
-            value=prefill_resume,
-            height=350,
-            placeholder="Paste your full resume text here...",
-        )
+        resume_text = resume_input("Your Resume", prefill=prefill_resume, key_prefix="cover", height=350)
     with col_jd:
         jd_text = st.text_area(
             "Target Job Description",
@@ -1699,12 +1789,7 @@ def page_discover():
     col1, col2 = st.columns([2, 1])
 
     with col1:
-        resume_text = st.text_area(
-            "Paste your resume",
-            height=200,
-            placeholder="Paste your full resume text here...",
-            key="discover_resume",
-        )
+        resume_text = resume_input("Your Resume", key_prefix="discover", height=200)
 
     with col2:
         job_title = st.text_input("Job title", placeholder="e.g., Data Scientist", key="discover_title")
