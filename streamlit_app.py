@@ -261,7 +261,6 @@ def resume_input(label: str = "Your Resume", prefill: str = "", key_prefix: str 
     Returns the resume text (from file, stored resume, or typed).
     """
     text_key = f"{key_prefix}_text"
-    extracted_key = f"{key_prefix}_extracted"
 
     # File upload
     uploaded = st.file_uploader(
@@ -270,38 +269,30 @@ def resume_input(label: str = "Your Resume", prefill: str = "", key_prefix: str 
         key=f"{key_prefix}_file_upload",
     )
 
-    # When a new file is uploaded, extract text and store in session state
+    # When a new file is uploaded, extract and write directly into the text_area's widget key
     if uploaded:
-        # Only extract once per file (check by name+size)
         file_sig = f"{uploaded.name}_{uploaded.size}"
         if st.session_state.get(f"{key_prefix}_file_sig") != file_sig:
             extracted = _extract_file_text(uploaded)
             if extracted and not extracted.startswith("["):
-                st.session_state[extracted_key] = extracted
+                # Write directly into the widget's session state key so text_area picks it up
+                st.session_state[text_key] = extracted
                 st.session_state[f"{key_prefix}_file_sig"] = file_sig
-                # Also save as stored resume automatically
                 st.session_state.stored_resume = extracted
                 st.rerun()
-    else:
-        # File was removed/cleared
-        if st.session_state.get(f"{key_prefix}_file_sig"):
-            st.session_state.pop(f"{key_prefix}_file_sig", None)
-            st.session_state.pop(extracted_key, None)
 
-    # Determine initial value: extracted from file > prefill > stored > empty
-    initial = (
-        st.session_state.get(extracted_key, "")
-        or prefill
-        or st.session_state.get("stored_resume", "")
-        or ""
-    )
+    # Pre-fill from stored resume or prefill (only if text_area hasn't been touched yet)
+    if text_key not in st.session_state:
+        default = prefill or st.session_state.get("stored_resume", "") or ""
+        if default:
+            st.session_state[text_key] = default
 
-    # Text area
+    # Text area — keyed, so Streamlit reads/writes st.session_state[text_key]
     resume_text = st.text_area(
         label,
-        value=initial,
         height=height,
         placeholder="Paste your resume text here, or upload a file above.",
+        key=text_key,
     )
 
     # Save toggle
@@ -322,6 +313,7 @@ def resume_input(label: str = "Your Resume", prefill: str = "", key_prefix: str 
             with col_b:
                 if st.button("Clear saved resume", key=f"{key_prefix}_clear"):
                     st.session_state.stored_resume = ""
+                    st.session_state.pop(text_key, None)
                     st.rerun()
         else:
             st.markdown(
