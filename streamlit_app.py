@@ -518,8 +518,13 @@ def page_scorer():
         unsafe_allow_html=True,
     )
 
-    # Free scores counter
-    if not is_authenticated() or (st.session_state.user and st.session_state.user.get("tier") == "free"):
+    # Free scores counter / Pro LLM toggle
+    is_pro = is_authenticated() and st.session_state.user and st.session_state.user.get("tier") == "pro"
+
+    if is_pro:
+        use_llm = st.toggle("Include LLM Analysis (Pro)", value=True, help="Add Claude-powered AI analysis on top of ATS + HR scoring")
+    else:
+        use_llm = False
         remaining = max(0, 5 - st.session_state.scores_used)
         st.markdown(
             f'<div style="text-align: right; color: #94a3b8; font-size: 13px; margin-bottom: 12px;">'
@@ -560,13 +565,15 @@ def page_scorer():
             st.warning("Job description seems too short. Please paste the full listing.")
             return
 
-        with st.spinner("Analyzing your resume against the job description..."):
+        endpoint = "/score/combined" if use_llm else "/score/both"
+        spinner_msg = "Analyzing with ATS + HR + LLM..." if use_llm else "Analyzing your resume against the job description..."
+
+        with st.spinner(spinner_msg):
             token = st.session_state.token
-            result = api("POST", "/score/both", {
-                "resume_text": resume_text,
-                "jd_text": jd_text,
-                "include_explanation": True,
-            }, token=token)
+            payload = {"resume_text": resume_text, "jd_text": jd_text}
+            if not use_llm:
+                payload["include_explanation"] = True
+            result = api("POST", endpoint, payload, token=token)
 
         if result["status"] == 402:
             # Free tier exhausted
@@ -594,7 +601,20 @@ def page_scorer():
             return
 
         # Success — store result and bump counter
-        st.session_state.score_result = result["data"]
+        data = result["data"]
+        # Normalize /score/combined response to match /score/both shape
+        if use_llm and "rules_ats" in data:
+            data["_llm_mode"] = True
+            data["ats"] = data.get("rules_ats", {})
+            data["hr"] = data.get("rules_hr", {}) or {}
+            data["summary"] = {
+                "ats_score": data.get("combined_ats", data["ats"].get("total_score", 0)),
+                "hr_score": data.get("combined_hr", data["hr"].get("overall_score", 0)),
+                "ats_rating": data["ats"].get("rating", ""),
+                "hr_recommendation": data["hr"].get("recommendation", ""),
+                "overall_assessment": "",
+            }
+        st.session_state.score_result = data
         st.session_state.scores_used += 1
 
     # Display results if available
@@ -642,13 +662,22 @@ def render_score_results(data: dict):
         st.markdown('</div>', unsafe_allow_html=True)
 
     # ─── Detailed Tabs ───────────────────────────────────────────────────
-    tab_ats, tab_hr = st.tabs(["ATS Analysis", "HR Analysis"])
+    llm_data = data.get("llm") if data.get("_llm_mode") else None
+    if llm_data and not llm_data.get("error"):
+        tab_ats, tab_hr, tab_llm = st.tabs(["ATS Analysis", "HR Analysis", "LLM Analysis"])
+    else:
+        tab_ats, tab_hr = st.tabs(["ATS Analysis", "HR Analysis"])
+        tab_llm = None
 
     with tab_ats:
         render_ats_tab(ats, explanation.get("ats", {}))
 
     with tab_hr:
         render_hr_tab(hr, explanation.get("hr", {}))
+
+    if tab_llm is not None:
+        with tab_llm:
+            render_llm_tab(llm_data, data.get("blend_details", {}))
 
 
 def render_ats_tab(ats: dict, ats_explanation: dict):
@@ -768,6 +797,114 @@ def render_hr_tab(hr: dict, hr_explanation: dict):
     if hr_explanation:
         st.markdown("---")
         render_hr_insights(hr_explanation)
+
+
+def render_llm_tab(llm_data: dict, blend_details: dict):
+    """LLM (Claude) analysis tab — Pro only."""
+    llm_ats = llm_data.get("ats_score")
+    llm_hr = llm_data.get("hr_score")
+
+    # LLM scores gauges
+    if llm_ats is not None and llm_hr is not None:
+        g1, g2 = st.columns(2)
+        with g1:
+            st.plotly_chart(make_gauge(llm_ats, "LLM ATS Score"), use_container_width=True)
+        with g2:
+            st.plotly_chart(make_gauge(llm_hr, "LLM HR Score"), use_container_width=True)
+
+    # Blend details
+    if blend_details and blend_details.get("method") != "rules_only":
+        st.markdown(
+            '<p style="color: #94a3b8; font-size: 13px; text-align: center;">'
+            "Scores above are from Claude AI. The combined scores on the gauges blend rules-based and LLM analysis.</p>",
+            unsafe_allow_html=True,
+        )
+
+    # Explanation summary
+    explanation = llm_data.get("explanation", "")
+    if explanation:
+        st.markdown("##### AI Summary")
+        st.info(explanation)
+
+    # Dimension breakdown — ATS
+    dimensions = llm_data.get("dimensions", {})
+    ats_dims = dimensions.get("ats", {})
+    if ats_dims:
+        dim_labels_ats = {
+            "keyword_match": "Keyword Match",
+            "phrase_match": "Phrase Match",
+            "industry_terms": "Industry Terms",
+            "semantic_similarity": "Semantic Similarity",
+            "bm25_relevance": "BM25 Relevance",
+            "graph_centrality": "Graph Centrality",
+            "skill_recency": "Skill Recency",
+            "job_title_match": "Job Title Match",
+        }
+        labels = []
+        values = []
+        for key, label in dim_labels_ats.items():
+            dim = ats_dims.get(key, {})
+            if isinstance(dim, dict) and "score" in dim:
+                labels.append(label)
+                values.append(dim["score"] * 20)  # 0-5 scale → 0-100
+        if labels:
+            st.plotly_chart(make_bar_chart(labels, values, "LLM ATS Dimensions"), use_container_width=True)
+
+        # Evidence details
+        with st.expander("ATS Dimension Evidence"):
+            for key, label in dim_labels_ats.items():
+                dim = ats_dims.get(key, {})
+                if isinstance(dim, dict) and dim.get("evidence"):
+                    st.markdown(f"**{label}** ({dim.get('score', 0)}/5): {dim['evidence']}")
+
+    # Dimension breakdown — HR
+    hr_dims = dimensions.get("hr", {})
+    if hr_dims:
+        dim_labels_hr = {
+            "job_fit": "Job Fit",
+            "experience_fit": "Experience Fit",
+            "skills_in_action": "Skills in Action",
+            "impact_signals": "Impact Signals",
+            "career_trajectory": "Career Trajectory",
+            "competitive_edge": "Competitive Edge",
+        }
+        labels = []
+        values = []
+        for key, label in dim_labels_hr.items():
+            dim = hr_dims.get(key, {})
+            if isinstance(dim, dict) and "score" in dim:
+                labels.append(label)
+                values.append(dim["score"] * 20)
+        if labels:
+            st.plotly_chart(make_bar_chart(labels, values, "LLM HR Dimensions"), use_container_width=True)
+
+        with st.expander("HR Dimension Evidence"):
+            for key, label in dim_labels_hr.items():
+                dim = hr_dims.get(key, {})
+                if isinstance(dim, dict) and dim.get("evidence"):
+                    st.markdown(f"**{label}** ({dim.get('score', 0)}/5): {dim['evidence']}")
+
+    # Penalties
+    penalties = llm_data.get("hr_penalties", {})
+    if penalties:
+        hopping = penalties.get("job_hopping", 0)
+        gaps = penalties.get("gaps", 0)
+        notes = penalties.get("notes", "")
+        if hopping or gaps:
+            st.markdown("##### LLM Risk Penalties")
+            if hopping:
+                st.markdown(f"- **Job Hopping**: {hopping} points")
+            if gaps:
+                st.markdown(f"- **Gaps**: {gaps} points")
+            if notes:
+                st.markdown(f"- _{notes}_")
+
+    # Domain detected
+    domain = llm_data.get("domain_detected", "")
+    if domain:
+        st.markdown(f"**Domain Detected (LLM):** {domain.replace('_', ' ').title()}")
+
+    st.markdown(f"**Model:** {llm_data.get('model_used', 'claude-sonnet-4-6')}")
 
 
 # ─── Auth pages ──────────────────────────────────────────────────────────────
