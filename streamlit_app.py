@@ -531,6 +531,19 @@ def page_scorer():
             f'Free scores remaining: <strong style="color: #818cf8;">{remaining}/5</strong></div>',
             unsafe_allow_html=True,
         )
+        # Signup prompt for anonymous users
+        if not is_authenticated():
+            signup_col1, signup_col2 = st.columns([5, 2])
+            with signup_col1:
+                st.markdown(
+                    '<p style="color: #94a3b8; font-size: 14px; margin: 0;">'
+                    'Create a free account to track your scores and unlock Pro features.</p>',
+                    unsafe_allow_html=True,
+                )
+            with signup_col2:
+                if st.button("Sign Up Free", key="top_signup", type="secondary", use_container_width=True):
+                    st.session_state.page = "register"
+                    st.rerun()
 
     # Input columns
     col_resume, col_jd = st.columns(2)
@@ -621,6 +634,44 @@ def page_scorer():
     data = st.session_state.score_result
     if data:
         render_score_results(data)
+
+        # Post-score signup/upgrade prompt
+        if not is_authenticated():
+            st.markdown("---")
+            st.markdown("""
+            <div class="card-accent" style="text-align: center;">
+                <p style="color: #818cf8; font-weight: 700; font-size: 18px; margin-bottom: 4px;">
+                    Want unlimited scores + AI-powered analysis?
+                </p>
+                <p style="color: #94a3b8; font-size: 14px;">
+                    Create a free account to save your results, then upgrade to Pro ($12/month)
+                    for unlimited scoring and Claude-powered LLM analysis.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            _, cta_col, _ = st.columns([2, 3, 2])
+            with cta_col:
+                if st.button("Create Free Account", key="post_score_signup", type="primary", use_container_width=True):
+                    st.session_state.page = "register"
+                    st.rerun()
+        elif not is_pro:
+            st.markdown("---")
+            st.markdown("""
+            <div class="card-accent" style="text-align: center;">
+                <p style="color: #818cf8; font-weight: 700; font-size: 18px; margin-bottom: 4px;">
+                    Unlock LLM-Powered Analysis
+                </p>
+                <p style="color: #94a3b8; font-size: 14px;">
+                    Upgrade to Pro ($12/month) for unlimited scoring and Claude AI analysis
+                    with detailed evidence and improvement suggestions.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            _, cta_col, _ = st.columns([2, 3, 2])
+            with cta_col:
+                if st.button("Upgrade to Pro", key="post_score_upgrade", type="primary", use_container_width=True):
+                    st.session_state.page = "dashboard"
+                    st.rerun()
 
 
 def render_score_results(data: dict):
