@@ -1562,7 +1562,7 @@ def page_rewriter():
             return
 
         st.session_state.rewrite_result = _rewrite_result
-        st.session_state.rewrite_jd_text = jd_text
+        st.session_state.rewrite_jd_saved = jd_text
         st.session_state.rewrite_company_val = _company_input
         st.session_state.rewrite_job_title_val = _job_title_input
         st.rerun()
