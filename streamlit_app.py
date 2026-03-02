@@ -40,6 +40,10 @@ _defaults = {
     "page": "home",
     "score_result": None,
     "scores_used": 0,
+    # Cross-page handoff from Discover → Score/Rewrite
+    "prefill_resume": "",
+    "prefill_jd": "",
+    "discover_results": None,
 }
 for key, val in _defaults.items():
     if key not in st.session_state:
@@ -207,7 +211,7 @@ def is_authenticated() -> bool:
 
 def render_nav():
     """Top navigation bar."""
-    cols = st.columns([1, 1, 1, 1, 1, 3])
+    cols = st.columns([1, 1, 1, 1, 1, 1, 2])
 
     with cols[0]:
         if st.button("Home", use_container_width=True, type="primary" if st.session_state.page == "home" else "secondary"):
@@ -218,10 +222,14 @@ def render_nav():
             st.session_state.page = "scorer"
             st.rerun()
     with cols[2]:
+        if st.button("Discover", use_container_width=True, type="primary" if st.session_state.page == "discover" else "secondary"):
+            st.session_state.page = "discover"
+            st.rerun()
+    with cols[3]:
         if st.button("Rewrite", use_container_width=True, type="primary" if st.session_state.page == "rewriter" else "secondary"):
             st.session_state.page = "rewriter"
             st.rerun()
-    with cols[3]:
+    with cols[5]:
         if is_authenticated():
             if st.button("Dashboard", use_container_width=True, type="primary" if st.session_state.page == "dashboard" else "secondary"):
                 st.session_state.page = "dashboard"
@@ -230,7 +238,7 @@ def render_nav():
             if st.button("Login", use_container_width=True, type="primary" if st.session_state.page == "login" else "secondary"):
                 st.session_state.page = "login"
                 st.rerun()
-    with cols[4]:
+    with cols[6]:
         if is_authenticated():
             if st.button("Logout", use_container_width=True):
                 st.session_state.token = None
@@ -565,21 +573,25 @@ def page_scorer():
                     st.session_state.page = "register"
                     st.rerun()
 
+    # Pre-fill from Discover page handoff (if any)
+    prefill_resume = st.session_state.pop("prefill_resume", "") or ""
+    prefill_jd = st.session_state.pop("prefill_jd", "") or ""
+
     # Input columns
     col_resume, col_jd = st.columns(2)
     with col_resume:
         resume_text = st.text_area(
             "Resume",
+            value=prefill_resume,
             height=350,
             placeholder="Paste your resume text here...\n\nInclude all sections: summary, experience, skills, education.",
-            key="resume_input",
         )
     with col_jd:
         jd_text = st.text_area(
             "Job Description",
+            value=prefill_jd,
             height=350,
             placeholder="Paste the job description here...\n\nInclude requirements, responsibilities, and qualifications.",
-            key="jd_input",
         )
 
     # Score button
@@ -1050,20 +1062,24 @@ def page_rewriter():
                 f'Rewrites remaining: <strong style="color: #818cf8;">{remaining}/{limit}</strong> this month</div>',
                 unsafe_allow_html=True,
             )
+    # Pre-fill from Discover page handoff (if any)
+    prefill_resume = st.session_state.pop("prefill_resume", "") or ""
+    prefill_jd = st.session_state.pop("prefill_jd", "") or ""
+
     col_resume, col_jd = st.columns(2)
     with col_resume:
         resume_text = st.text_area(
             "Your Resume",
+            value=prefill_resume,
             height=400,
             placeholder="Paste your full resume text here...",
-            key="rewrite_resume_input",
         )
     with col_jd:
         jd_text = st.text_area(
             "Target Job Description",
+            value=prefill_jd,
             height=400,
             placeholder="Paste the job description you're applying for...",
-            key="rewrite_jd_input",
         )
 
     _, btn_col, _ = st.columns([3, 2, 3])
@@ -1420,6 +1436,336 @@ def page_dashboard():
                 st.error(result["data"].get("detail", "Failed to create API key."))
 
 
+# ─── Cover Letter page ───────────────────────────────────────────────────────
+
+
+def page_cover_letter():
+    """Pro + Ultra tier: AI cover letter generation."""
+    st.markdown('<div class="section-title">AI Cover Letter</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-subtitle">Generate a tailored cover letter from your resume and a job description.</div>',
+        unsafe_allow_html=True,
+    )
+
+    user_tier = ""
+    if is_authenticated() and st.session_state.user:
+        user_tier = st.session_state.user.get("tier", "free")
+
+    can_generate = user_tier in ("pro", "ultra")
+
+    if not can_generate:
+        st.markdown("""
+        <div class="card-accent" style="text-align: center; border-color: #818cf8;">
+            <p style="color: #818cf8; font-weight: 700; font-size: 20px; margin-bottom: 8px;">
+                Pro Feature
+            </p>
+            <p style="color: #94a3b8; font-size: 15px; margin-bottom: 16px;">
+                AI cover letter generation is available on Pro ($12/month) and
+                Ultra ($29/month). Claude AI writes a compelling, ready-to-send
+                cover letter tailored to each job.
+            </p>
+            <p style="color: #94a3b8; font-size: 14px;">
+                &#10003; Personalized to each JD &nbsp;&nbsp;
+                &#10003; Highlights your best matches &nbsp;&nbsp;
+                &#10003; Ready to send (no blanks)
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("")
+        _, cta_col, _ = st.columns([2, 3, 2])
+        with cta_col:
+            if not is_authenticated():
+                if st.button("Sign Up to Get Started", type="primary", use_container_width=True, key="cl_signup"):
+                    st.session_state.page = "register"
+                    st.rerun()
+            else:
+                if st.button("Upgrade to Pro ($12/month)", type="primary", use_container_width=True, key="cl_upgrade"):
+                    with st.spinner("Creating checkout session..."):
+                        result = api("POST", "/billing/checkout", {"tier": "pro"}, token=st.session_state.token)
+                    if result["status"] == 200 and "checkout_url" in result["data"]:
+                        st.link_button("Complete Payment on Stripe", result["data"]["checkout_url"], use_container_width=True)
+                    elif result["status"] == 503:
+                        st.warning("Stripe billing is not configured yet.")
+                    else:
+                        st.error(result["data"].get("detail", "Could not create checkout session."))
+        return
+
+    # ─── Pro / Ultra user: show the generator ─────────────────────────────
+    prefill_resume = st.session_state.pop("prefill_resume", "") or ""
+    prefill_jd = st.session_state.pop("prefill_jd", "") or ""
+
+    col_resume, col_jd = st.columns(2)
+    with col_resume:
+        resume_text = st.text_area(
+            "Your Resume",
+            value=prefill_resume,
+            height=350,
+            placeholder="Paste your full resume text here...",
+        )
+    with col_jd:
+        jd_text = st.text_area(
+            "Target Job Description",
+            value=prefill_jd,
+            height=350,
+            placeholder="Paste the job description here...",
+        )
+
+    _, btn_col, _ = st.columns([3, 2, 3])
+    with btn_col:
+        generate_clicked = st.button("Generate Cover Letter", use_container_width=True, type="primary")
+
+    if generate_clicked:
+        if not resume_text or not jd_text:
+            st.error("Please paste both your resume and the job description.")
+            return
+        if len(resume_text.strip()) < 100:
+            st.warning("Resume seems too short. Please paste the full text.")
+            return
+
+        with st.spinner("Claude is writing your cover letter... This may take 15-30 seconds."):
+            result = api("POST", "/cover-letter", {
+                "resume_text": resume_text,
+                "jd_text": jd_text,
+            }, token=st.session_state.token)
+
+        if result["status"] != 200:
+            st.error(f"Generation failed: {result['data'].get('detail', 'Unknown error')}")
+            return
+
+        st.session_state.cover_letter_result = result["data"]
+
+    # Display result
+    data = st.session_state.get("cover_letter_result")
+    if data:
+        render_cover_letter_result(data)
+
+
+def render_cover_letter_result(data: dict):
+    """Display generated cover letter with copy/download options."""
+    paragraphs = data.get("paragraphs", [])
+    full_text = data.get("full_text", "")
+    company = data.get("company", "")
+    title = data.get("job_title", "")
+    word_count = data.get("word_count", 0)
+
+    st.markdown("---")
+
+    # Header info
+    meta_cols = st.columns(3)
+    with meta_cols[0]:
+        st.metric("Company", company or "Detected")
+    with meta_cols[1]:
+        st.metric("Position", title or "Detected")
+    with meta_cols[2]:
+        color = "#22c55e" if word_count <= 400 else "#eab308"
+        st.metric("Word Count", f"{word_count}")
+        if word_count > 400:
+            st.caption("Slightly over 1-page target")
+
+    st.markdown("---")
+
+    # Render each paragraph
+    st.markdown("### Your Cover Letter")
+    for i, para in enumerate(paragraphs):
+        st.markdown(f"<p style='color: #e2e8f0; line-height: 1.7; margin-bottom: 16px;'>{para}</p>", unsafe_allow_html=True)
+
+    # Copy/download
+    st.markdown("---")
+    action_cols = st.columns([1, 1, 2])
+    with action_cols[0]:
+        st.download_button(
+            "Download as .txt",
+            data=full_text,
+            file_name=f"Cover_Letter_{company.replace(' ', '_')}.txt" if company else "Cover_Letter.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
+    with action_cols[1]:
+        st.code(full_text, language=None)
+
+
+# ─── Job Discovery page ──────────────────────────────────────────────────────
+
+
+def render_job_card(rank: int, job: dict, resume_text: str = ""):
+    """Render a single job result card with action buttons."""
+    ats = job.get("ats_score", 0)
+    hr = job.get("hr_score", 0)
+
+    # Score color
+    if ats >= 75:
+        ats_color = "#22c55e"
+    elif ats >= 60:
+        ats_color = "#eab308"
+    else:
+        ats_color = "#ef4444"
+
+    if hr >= 70:
+        hr_color = "#22c55e"
+    elif hr >= 55:
+        hr_color = "#eab308"
+    else:
+        hr_color = "#ef4444"
+
+    salary_text = ""
+    if job.get("salary_min") and job.get("salary_max"):
+        salary_text = f"${job['salary_min']:,.0f} – ${job['salary_max']:,.0f}"
+    elif job.get("salary_min"):
+        salary_text = f"${job['salary_min']:,.0f}+"
+
+    rec = job.get("hr_detail", {}).get("recommendation", "")
+    rec_badge = ""
+    if rec:
+        badge_colors = {
+            "STRONG INTERVIEW": "#22c55e",
+            "INTERVIEW": "#22c55e",
+            "MAYBE": "#eab308",
+            "PASS": "#ef4444",
+        }
+        bc = badge_colors.get(rec, "#94a3b8")
+        rec_badge = f'<span style="background: {bc}22; color: {bc}; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{rec}</span>'
+
+    matched_kw = job.get("ats_detail", {}).get("matched_keywords", [])
+    missing_kw = job.get("ats_detail", {}).get("missing_keywords", [])
+
+    matched_chips = " ".join(
+        f'<span style="background: #22c55e22; color: #22c55e; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin: 1px;">{kw}</span>'
+        for kw in matched_kw[:8]
+    )
+    missing_chips = " ".join(
+        f'<span style="background: #ef444422; color: #ef4444; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin: 1px;">{kw}</span>'
+        for kw in missing_kw[:5]
+    )
+
+    st.markdown(
+        f"""<div class="card" style="margin-bottom: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: start;">
+            <div>
+                <span style="color: #818cf8; font-weight: 700; font-size: 14px;">#{rank}</span>
+                <span style="color: #e2e8f0; font-weight: 600; font-size: 16px; margin-left: 8px;">{job.get('title', 'Unknown')}</span>
+                {rec_badge}
+            </div>
+            <div style="text-align: right;">
+                <span style="color: {ats_color}; font-weight: 700; font-size: 18px;">ATS {ats}%</span>
+                <span style="color: #475569; margin: 0 6px;">|</span>
+                <span style="color: {hr_color}; font-weight: 700; font-size: 18px;">HR {hr}%</span>
+            </div>
+        </div>
+        <div style="margin-top: 6px; color: #94a3b8; font-size: 14px;">
+            <strong>{job.get('company', '')}</strong> &nbsp;&bull;&nbsp; {job.get('location', '')}
+            {f' &nbsp;&bull;&nbsp; <span style="color: #818cf8;">{salary_text}</span>' if salary_text else ''}
+            {f' &nbsp;&bull;&nbsp; Posted: {job.get("posted_date", "")}' if job.get("posted_date") else ''}
+        </div>
+        <div style="margin-top: 8px;">
+            {f'<div style="margin-bottom: 4px;"><span style="color: #64748b; font-size: 11px;">MATCHED:</span> {matched_chips}</div>' if matched_chips else ''}
+            {f'<div><span style="color: #64748b; font-size: 11px;">MISSING:</span> {missing_chips}</div>' if missing_chips else ''}
+        </div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
+    # Action buttons row
+    btn_cols = st.columns([1, 1, 1, 1, 2])
+    jd_text = job.get("description", "")
+
+    with btn_cols[0]:
+        if job.get("url"):
+            st.link_button("View Listing", job["url"], use_container_width=True)
+
+    with btn_cols[1]:
+        if st.button("Score", key=f"score_{rank}", use_container_width=True):
+            st.session_state.prefill_resume = resume_text
+            st.session_state.prefill_jd = jd_text
+            st.session_state.page = "scorer"
+            st.rerun()
+
+    with btn_cols[2]:
+        if st.button("Tailor Resume", key=f"tailor_{rank}", use_container_width=True):
+            st.session_state.prefill_resume = resume_text
+            st.session_state.prefill_jd = jd_text
+            st.session_state.page = "rewriter"
+            st.rerun()
+
+    with btn_cols[3]:
+        if st.button("Cover Letter", key=f"cl_{rank}", use_container_width=True, type="primary"):
+            st.session_state.prefill_resume = resume_text
+            st.session_state.prefill_jd = jd_text
+            st.session_state.page = "cover_letter"
+            st.rerun()
+
+
+def page_discover():
+    """Job Discovery page — search and score jobs against your resume."""
+    st.markdown("## Discover Jobs")
+    st.markdown(
+        '<p style="color: #94a3b8;">Search for jobs and see how your resume scores against each one.</p>',
+        unsafe_allow_html=True,
+    )
+
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        resume_text = st.text_area(
+            "Paste your resume",
+            height=200,
+            placeholder="Paste your full resume text here...",
+            key="discover_resume",
+        )
+
+    with col2:
+        job_title = st.text_input("Job title", placeholder="e.g., Data Scientist", key="discover_title")
+        location = st.text_input("Location (optional)", placeholder="e.g., New York", key="discover_location")
+        remote_only = st.checkbox("Include remote jobs", key="discover_remote")
+        max_results = st.slider("Max results", 3, 20, 10, key="discover_max")
+
+    if st.button("Search & Score", type="primary", use_container_width=True, disabled=not resume_text or not job_title):
+        with st.spinner("Searching jobs and scoring matches..."):
+            result = api("POST", "/jobs/discover", json_data={
+                "resume_text": resume_text,
+                "job_title": job_title,
+                "location": location,
+                "remote_only": remote_only,
+                "max_results": max_results,
+            }, token=st.session_state.token)
+
+            if result["ok"]:
+                data = result["data"]
+                if data.get("setup_required"):
+                    st.info(data.get("message", "API keys required for job discovery."))
+                    st.session_state.discover_results = None
+                elif not data.get("jobs"):
+                    st.warning(data.get("message", "No jobs found. Try a different job title or location."))
+                    st.session_state.discover_results = None
+                else:
+                    st.session_state.discover_results = {
+                        "jobs": data["jobs"],
+                        "resume_text": resume_text,
+                        "attribution": data.get("attribution", ""),
+                    }
+            else:
+                detail = result.get("data", {}).get("detail", "Job discovery failed.")
+                st.error(detail)
+                st.session_state.discover_results = None
+
+    # Render persisted results (survives reruns for button clicks)
+    cached = st.session_state.get("discover_results")
+    if cached:
+        jobs = cached["jobs"]
+        cached_resume = cached.get("resume_text", "")
+        st.success(f"Found {len(jobs)} matching jobs, ranked by fit score.")
+
+        for job in jobs:
+            render_job_card(job["rank"], job, resume_text=cached_resume)
+
+        attr = cached.get("attribution", "")
+        if attr:
+            st.markdown(
+                f'<div style="text-align: center; color: #64748b; font-size: 12px; margin-top: 16px;">{attr}</div>',
+                unsafe_allow_html=True,
+            )
+
+
 # ─── Main router ─────────────────────────────────────────────────────────────
 
 def render_footer():
@@ -1444,6 +1790,10 @@ def main():
         page_home()
     elif page == "scorer":
         page_scorer()
+    elif page == "discover":
+        page_discover()
+    elif page == "cover_letter":
+        page_cover_letter()
     elif page == "rewriter":
         page_rewriter()
     elif page == "register":
