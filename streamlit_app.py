@@ -1808,8 +1808,22 @@ def _make_resume_docx(resume_text: str, format_style: str = "ats") -> bytes:
 
         # Publications section: hanging-indent citations; Education: bold degree line
         if current_section in PUB_SECTIONS:
-            _pub_num += 1
-            _hanging_para(f"{_pub_num}.\u2002{s}")
+            # Short lines with no year are sub-category headers (e.g. "Peer-Reviewed Articles")
+            _has_year = bool(re.search(r'\b(?:19|20)\d{2}\b', s))
+            _is_pub_subheader = len(s) < 65 and not _has_year
+            if _is_pub_subheader:
+                p = doc.add_paragraph()
+                run = p.add_run(s)
+                run.bold = True
+                run.italic = True
+                run.font.name = t["font"]
+                run.font.size = Pt(t["body_size"])
+                p.paragraph_format.space_before = Pt(8)
+                p.paragraph_format.space_after = Pt(3)
+                _pub_num = 0  # restart numbering for each sub-category
+            else:
+                _pub_num += 1
+                _hanging_para(f"{_pub_num}.\u2002{s}")
         elif current_section in EDU_SECTIONS and not s[0].isdigit() and "|" not in s:
             # Degree name — bold; school/date lines already caught by pipe/date rules
             _para(s, bold=True, size=t["body_size"], sb=4, sa=1)
