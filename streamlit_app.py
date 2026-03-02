@@ -239,6 +239,8 @@ def api(method: str, endpoint: str, json_data: dict = None, token: str = None) -
             r = requests.get(url, headers=headers, timeout=timeout)
         elif method == "DELETE":
             r = requests.delete(url, headers=headers, timeout=timeout)
+        elif method == "PUT":
+            r = requests.put(url, json=json_data or {}, headers=headers, timeout=timeout)
         else:
             r = requests.post(url, json=json_data or {}, headers=headers, timeout=timeout)
         try:
@@ -2818,7 +2820,8 @@ def page_tracker():
 
     result = api("GET", "/tracker", token=st.session_state.token)
     if result["status"] != 200:
-        st.error("Could not load tracker — tracker may be unavailable on the free tier.")
+        _detail = result.get("data", {}).get("detail", f"HTTP {result['status']}")
+        st.error(f"Tracker error: {_detail}")
         return
 
     apps = result.get("data", {}).get("applications", [])
