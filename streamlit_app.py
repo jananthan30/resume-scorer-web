@@ -43,6 +43,8 @@ _defaults = {
     # Cross-page handoff from Discover → Score/Rewrite
     "prefill_resume": "",
     "prefill_jd": "",
+    "prefill_job_url": "",
+    "prefill_job_title": "",
     "discover_results": None,
     "stored_resume": "",  # Saved resume text persists across pages
     "resume_on_file": False,  # True when resume is persisted in cloud DB
@@ -231,6 +233,39 @@ def _delete_resume_from_cloud(token: str) -> bool:
     """Delete the saved resume from cloud DB. Returns True on success."""
     result = api("DELETE", "/resume", token=token)
     return result["status"] == 200
+
+
+def _fetch_full_jd(job_url: str, job_title: str, token: str) -> tuple:
+    """Scrape full JD from listing URL. Returns (jd_text, error_message)."""
+    result = api(
+        "POST",
+        "/jobs/fetch-jd",
+        {"url": job_url, "job_title": job_title, "use_ai": True},
+        token=token,
+    )
+    if result["status"] == 200:
+        return result["data"].get("jd_text", ""), ""
+    return "", result["data"].get("detail", "Could not fetch the job description.")
+
+
+def _apply_jd_prefill(jd_key: str, prefill_jd: str, job_url: str, job_title: str):
+    """
+    Called once per navigation from a job card.
+    Scrapes the full JD; falls back to the API snippet on failure.
+    Writes result into st.session_state[jd_key].
+    Returns (final_jd_text, warning_message).
+    """
+    if job_url and is_authenticated():
+        with st.spinner("Fetching full job description from listing…"):
+            full_jd, err = _fetch_full_jd(job_url, job_title, st.session_state.token)
+        if full_jd and len(full_jd) > len(prefill_jd):
+            st.session_state[jd_key] = full_jd
+            return full_jd, ""
+        warn = err or "Could not fetch the full listing — showing the API snippet. You can paste the full JD below."
+        st.session_state[jd_key] = prefill_jd
+        return prefill_jd, warn
+    st.session_state[jd_key] = prefill_jd
+    return prefill_jd, ""
 
 
 def _extract_file_text(uploaded_file) -> str:
@@ -748,8 +783,12 @@ def page_scorer():
     # Pre-fill from Discover page handoff (if any)
     prefill_resume = st.session_state.pop("prefill_resume", "") or ""
     prefill_jd = st.session_state.pop("prefill_jd", "") or ""
-    if prefill_jd:
-        st.session_state["score_jd_text"] = prefill_jd
+    prefill_job_url = st.session_state.pop("prefill_job_url", "") or ""
+    prefill_job_title = st.session_state.pop("prefill_job_title", "") or ""
+    if prefill_jd or prefill_job_url:
+        prefill_jd, jd_warn = _apply_jd_prefill("score_jd_text", prefill_jd, prefill_job_url, prefill_job_title)
+        if jd_warn:
+            st.warning(f"⚠ {jd_warn}")
 
     # Input columns
     col_resume, col_jd = st.columns(2)
@@ -1246,8 +1285,12 @@ def page_rewriter():
     # Pre-fill from Discover page handoff (if any)
     prefill_resume = st.session_state.pop("prefill_resume", "") or ""
     prefill_jd = st.session_state.pop("prefill_jd", "") or ""
-    if prefill_jd:
-        st.session_state["rewrite_jd_text"] = prefill_jd
+    prefill_job_url = st.session_state.pop("prefill_job_url", "") or ""
+    prefill_job_title = st.session_state.pop("prefill_job_title", "") or ""
+    if prefill_jd or prefill_job_url:
+        prefill_jd, jd_warn = _apply_jd_prefill("rewrite_jd_text", prefill_jd, prefill_job_url, prefill_job_title)
+        if jd_warn:
+            st.warning(f"⚠ {jd_warn}")
 
     col_resume, col_jd = st.columns(2)
     with col_resume:
@@ -1699,8 +1742,12 @@ def page_cover_letter():
     # ─── Pro / Ultra user: show the generator ─────────────────────────────
     prefill_resume = st.session_state.pop("prefill_resume", "") or ""
     prefill_jd = st.session_state.pop("prefill_jd", "") or ""
-    if prefill_jd:
-        st.session_state["cover_jd_text"] = prefill_jd
+    prefill_job_url = st.session_state.pop("prefill_job_url", "") or ""
+    prefill_job_title = st.session_state.pop("prefill_job_title", "") or ""
+    if prefill_jd or prefill_job_url:
+        prefill_jd, jd_warn = _apply_jd_prefill("cover_jd_text", prefill_jd, prefill_job_url, prefill_job_title)
+        if jd_warn:
+            st.warning(f"⚠ {jd_warn}")
 
     col_resume, col_jd = st.columns(2)
     with col_resume:
@@ -1886,10 +1933,15 @@ def render_job_card(rank: int, job: dict, resume_text: str = ""):
         if job.get("url"):
             st.link_button("View Listing", job["url"], use_container_width=True)
 
+    job_url = job.get("url", "")
+    job_title_nav = job.get("title", "")
+
     with btn_cols[1]:
         if st.button("Score", key=f"score_{rank}", use_container_width=True):
             st.session_state.prefill_resume = resume_text
             st.session_state.prefill_jd = jd_text
+            st.session_state.prefill_job_url = job_url
+            st.session_state.prefill_job_title = job_title_nav
             st.session_state.page = "scorer"
             st.rerun()
 
@@ -1897,6 +1949,8 @@ def render_job_card(rank: int, job: dict, resume_text: str = ""):
         if st.button("Tailor Resume", key=f"tailor_{rank}", use_container_width=True):
             st.session_state.prefill_resume = resume_text
             st.session_state.prefill_jd = jd_text
+            st.session_state.prefill_job_url = job_url
+            st.session_state.prefill_job_title = job_title_nav
             st.session_state.page = "rewriter"
             st.rerun()
 
@@ -1904,6 +1958,8 @@ def render_job_card(rank: int, job: dict, resume_text: str = ""):
         if st.button("Cover Letter", key=f"cl_{rank}", use_container_width=True, type="primary"):
             st.session_state.prefill_resume = resume_text
             st.session_state.prefill_jd = jd_text
+            st.session_state.prefill_job_url = job_url
+            st.session_state.prefill_job_title = job_title_nav
             st.session_state.page = "cover_letter"
             st.rerun()
 
