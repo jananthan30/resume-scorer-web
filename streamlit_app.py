@@ -1792,6 +1792,69 @@ def page_discover():
         unsafe_allow_html=True,
     )
 
+    # ─── Auth gate: require login ─────────────────────────────────────────
+    if not is_authenticated():
+        st.markdown("""
+        <div class="card-accent" style="text-align: center; border-color: #818cf8;">
+            <p style="color: #818cf8; font-weight: 700; font-size: 20px; margin-bottom: 8px;">
+                Sign Up to Discover Jobs
+            </p>
+            <p style="color: #94a3b8; font-size: 15px; margin-bottom: 16px;">
+                Job discovery searches thousands of openings and scores each one against
+                your resume with ATS + HR analysis. Create a free account to get started.
+            </p>
+            <p style="color: #94a3b8; font-size: 14px;">
+                &#10003; Free: 2 discoveries included &nbsp;&nbsp;
+                &#10003; Pro: unlimited &nbsp;&nbsp;
+                &#10003; Real job listings from Adzuna
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown("")
+        _, cta_col, _ = st.columns([2, 3, 2])
+        with cta_col:
+            if st.button("Sign Up Free", type="primary", use_container_width=True, key="discover_signup"):
+                st.session_state.page = "register"
+                st.rerun()
+        return
+
+    # ─── Usage check for free tier ────────────────────────────────────────
+    user_tier = st.session_state.user.get("tier", "free") if st.session_state.user else "free"
+    if user_tier == "free":
+        remaining = max(0, 5 - st.session_state.scores_used)
+        if remaining <= 0:
+            st.markdown("""
+            <div class="card-accent" style="text-align: center; border-color: #eab308;">
+                <p style="color: #eab308; font-weight: 700; font-size: 18px; margin-bottom: 8px;">
+                    Free Limit Reached
+                </p>
+                <p style="color: #94a3b8; font-size: 15px;">
+                    You've used all 5 free scores. Each job discovery counts as 1 score.
+                    Upgrade to Pro for unlimited discoveries.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown("")
+            _, pro_col, ultra_col, _ = st.columns([1, 2, 2, 1])
+            with pro_col:
+                if st.button("Pro — $12/month", type="primary", use_container_width=True, key="discover_pro"):
+                    with st.spinner("Creating checkout session..."):
+                        result = api("POST", "/billing/checkout", {"tier": "pro"}, token=st.session_state.token)
+                    if result["status"] == 200 and "checkout_url" in result["data"]:
+                        st.link_button("Complete Payment on Stripe", result["data"]["checkout_url"], use_container_width=True)
+            with ultra_col:
+                if st.button("Ultra — $29/month", use_container_width=True, key="discover_ultra"):
+                    with st.spinner("Creating checkout session..."):
+                        result = api("POST", "/billing/checkout", {"tier": "ultra"}, token=st.session_state.token)
+                    if result["status"] == 200 and "checkout_url" in result["data"]:
+                        st.link_button("Complete Payment on Stripe", result["data"]["checkout_url"], use_container_width=True)
+            return
+        st.markdown(
+            f'<div style="text-align: right; color: #94a3b8; font-size: 13px; margin-bottom: 12px;">'
+            f'Free scores remaining: <strong style="color: #818cf8;">{remaining}/5</strong> (each discovery = 1 score)</div>',
+            unsafe_allow_html=True,
+        )
+
     col1, col2 = st.columns([2, 1])
 
     with col1:
