@@ -1402,38 +1402,6 @@ def page_dashboard():
             else:
                 st.error(result["data"].get("detail", "Billing portal unavailable."))
 
-    st.markdown("---")
-
-    # API Key section (collapsed by default)
-    with st.expander("Developer: API Keys"):
-        st.markdown(
-            '<p style="color: #94a3b8; font-size: 13px;">'
-            "Generate an API key to use the scorer from scripts, CI/CD, or the CLI.</p>",
-            unsafe_allow_html=True,
-        )
-
-        with st.form("apikey_form"):
-            label = st.text_input("Key label (optional)", placeholder="e.g. my-laptop")
-            create_key = st.form_submit_button("Generate API Key")
-
-        if create_key:
-            with st.spinner("Generating..."):
-                result = api("POST", "/auth/api-key", {"label": label}, token=token)
-
-            if result["status"] == 200:
-                st.success("API key created! Copy it now — it won't be shown again.")
-                st.code(result["data"]["api_key"], language=None)
-                st.markdown(
-                    "**Usage:**\n"
-                    "```bash\n"
-                    "curl -X POST https://resume-scorer.fly.dev/score/both \\\n"
-                    '  -H "X-API-Key: YOUR_KEY" \\\n'
-                    '  -H "Content-Type: application/json" \\\n'
-                    "  -d '{\"resume_text\":\"...\", \"jd_text\":\"...\"}'\n"
-                    "```"
-                )
-            else:
-                st.error(result["data"].get("detail", "Failed to create API key."))
 
 
 # ─── Cover Letter page ───────────────────────────────────────────────────────
